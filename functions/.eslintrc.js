@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
+const path = require("path");
+
 module.exports = {
   root: true,
   env: {
@@ -14,7 +17,11 @@ module.exports = {
   ],
   parser: "@typescript-eslint/parser",
   parserOptions: {
-    project: ["tsconfig.json", "tsconfig.dev.json"],
+    project: [
+      path.resolve(__dirname, "tsconfig.json"),
+      path.resolve(__dirname, "tsconfig.dev.json"),
+    ],
+    tsconfigRootDir: __dirname,
     sourceType: "module",
   },
   ignorePatterns: [
