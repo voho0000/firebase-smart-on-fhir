@@ -39,16 +39,20 @@ export const handleOpenAIStreaming = async (
     streamOptions.presencePenalty = chatRequest.presence_penalty;
   }
 
-  const result = streamText(streamOptions);
-
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Vercel-AI-Data-Stream", "v1");
+  res.setHeader("Transfer-Encoding", "chunked");
+
+  const result = await streamText(streamOptions);
 
   for await (const chunk of result.fullStream) {
     if (chunk.type === "text-delta") {
       res.write(`0:${JSON.stringify(chunk.text)}\n`);
+      if (typeof (res as any).flush === "function") {
+        (res as any).flush();
+      }
     } else if (chunk.type === "finish") {
       res.write(`d:{"finishReason":"${chunk.finishReason}"}\n`);
     }
