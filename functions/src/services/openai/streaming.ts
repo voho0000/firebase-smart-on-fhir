@@ -1,6 +1,7 @@
 import type {Response} from "express";
-import {openai} from "@ai-sdk/openai";
+import {createOpenAI} from "@ai-sdk/openai";
 import {streamText} from "ai";
+import {getOpenAiApiKey} from "../../config/runtime";
 import type {OpenAIStreamOptions} from "./types";
 
 export const handleOpenAIStreaming = async (
@@ -12,6 +13,8 @@ export const handleOpenAIStreaming = async (
   chatRequest: Record<string, unknown>,
   res: Response,
 ): Promise<void> => {
+  const apiKey = getOpenAiApiKey();
+  const openai = createOpenAI({apiKey});
   const openaiModel = openai(model as string);
 
   const streamOptions: OpenAIStreamOptions = {
@@ -47,16 +50,42 @@ export const handleOpenAIStreaming = async (
 
   const result = await streamText(streamOptions);
 
-  for await (const chunk of result.fullStream) {
-    if (chunk.type === "text-delta") {
-      res.write(`0:${JSON.stringify(chunk.text)}\n`);
-      if (typeof (res as any).flush === "function") {
-        (res as any).flush();
+  try {
+    for await (const chunk of result.fullStream) {
+      if (chunk.type === "text-delta") {
+        if (!res.writableEnded) {
+          try {
+            res.write(`0:${JSON.stringify(chunk.text)}\n`);
+            const resWithFlush = res as Response & {flush?: () => void};
+            if (typeof resWithFlush.flush === "function") {
+              resWithFlush.flush();
+            }
+          } catch (writeError) {
+            break;
+          }
+        } else {
+          break;
+        }
+      } else if (chunk.type === "finish") {
+        if (!res.writableEnded) {
+          try {
+            res.write(`d:{"finishReason":"${chunk.finishReason}"}\n`);
+          } catch (writeError) {
+            break;
+          }
+        }
       }
-    } else if (chunk.type === "finish") {
-      res.write(`d:{"finishReason":"${chunk.finishReason}"}\n`);
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (!errorMessage.includes("write after end") &&
+        !errorMessage.includes("EPIPE") &&
+        !errorMessage.includes("ECONNRESET")) {
+      throw error;
     }
   }
 
-  res.end();
+  if (!res.writableEnded) {
+    res.end();
+  }
 };

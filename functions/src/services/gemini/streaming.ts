@@ -1,6 +1,8 @@
 import type {Response} from "express";
-import {google} from "@ai-sdk/google";
+import {createGoogleGenerativeAI} from "@ai-sdk/google";
 import {streamText} from "ai";
+import * as logger from "firebase-functions/logger";
+import {getGeminiApiKey} from "../../config/runtime";
 import type {GeminiStreamOptions} from "./types";
 import type {ChatMessage} from "../../types/common";
 
@@ -10,6 +12,8 @@ export const handleGeminiStreaming = async (
   generationConfig: Record<string, unknown> | undefined,
   res: Response,
 ): Promise<void> => {
+  const apiKey = getGeminiApiKey();
+  const google = createGoogleGenerativeAI({apiKey});
   const geminiModel = google(model);
 
   const streamOptions: GeminiStreamOptions = {
@@ -46,16 +50,45 @@ export const handleGeminiStreaming = async (
 
   const result = await streamText(streamOptions);
 
-  for await (const chunk of result.fullStream) {
-    if (chunk.type === "text-delta") {
-      res.write(`0:${JSON.stringify(chunk.text)}\n`);
-      if (typeof (res as any).flush === "function") {
-        (res as any).flush();
+  try {
+    for await (const chunk of result.fullStream) {
+      if (chunk.type === "text-delta") {
+        if (!res.writableEnded) {
+          try {
+            res.write(`0:${JSON.stringify(chunk.text)}\n`);
+            const resWithFlush = res as Response & {flush?: () => void};
+            if (typeof resWithFlush.flush === "function") {
+              resWithFlush.flush();
+            }
+          } catch (writeError) {
+            logger.info("Client disconnected, stopping stream");
+            break;
+          }
+        } else {
+          break;
+        }
+      } else if (chunk.type === "finish") {
+        if (!res.writableEnded) {
+          try {
+            res.write(`d:{"finishReason":"${chunk.finishReason}"}\n`);
+          } catch (writeError) {
+            break;
+          }
+        }
       }
-    } else if (chunk.type === "finish") {
-      res.write(`d:{"finishReason":"${chunk.finishReason}"}\n`);
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes("write after end") ||
+        errorMessage.includes("EPIPE") ||
+        errorMessage.includes("ECONNRESET")) {
+      logger.info("Stream interrupted by client disconnect");
+    } else {
+      throw error;
     }
   }
 
-  res.end();
+  if (!res.writableEnded) {
+    res.end();
+  }
 };
