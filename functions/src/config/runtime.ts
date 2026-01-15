@@ -6,6 +6,7 @@ import {DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_BASE_URL} from "./constants";
 let loggedConfigFallback = false;
 let loggedMissingOpenAiKey = false;
 let loggedMissingGeminiKey = false;
+let loggedMissingPerplexityKey = false;
 
 const loadRuntimeConfig = (): RuntimeConfig => {
   try {
@@ -33,6 +34,7 @@ export const getRuntimeConfig = (): RuntimeConfig => {
   const openai = runtime.openai ?? {};
   const proxy = runtime.proxy ?? {};
   const gemini = runtime.gemini ?? {};
+  const perplexity = runtime.perplexity ?? {};
 
   const mergedOpenAi = {
     key: openai.key ?? process.env.OPENAI_KEY ?? process.env.OPENAI_API_KEY,
@@ -59,10 +61,18 @@ export const getRuntimeConfig = (): RuntimeConfig => {
       DEFAULT_GEMINI_MODEL,
   } as RuntimeConfig["gemini"];
 
+  const mergedPerplexity = {
+    key:
+      perplexity.key ??
+      process.env.PERPLEXITY_API_KEY ??
+      process.env.PERPLEXITY_KEY,
+  } as RuntimeConfig["perplexity"];
+
   return {
     openai: mergedOpenAi,
     proxy: mergedProxy,
     gemini: mergedGemini,
+    perplexity: mergedPerplexity,
   };
 };
 
@@ -115,3 +125,19 @@ export const getGeminiDefaultModel = (): string =>
   getRuntimeConfig().gemini?.default_model ??
   process.env.GEMINI_DEFAULT_MODEL ??
   "gemini-3.0-flash";
+
+export const getPerplexityApiKey = (): string | undefined => {
+  const runtime = getRuntimeConfig();
+  const key = runtime.perplexity?.key;
+
+  if (!key && !loggedMissingPerplexityKey) {
+    logger.warn("Perplexity API key unavailable", {
+      hasRuntimeKey: Boolean(runtime.perplexity?.key),
+      hasEnvPerplexityApiKey: Boolean(process.env.PERPLEXITY_API_KEY),
+      hasEnvPerplexityKey: Boolean(process.env.PERPLEXITY_KEY),
+    });
+    loggedMissingPerplexityKey = true;
+  }
+
+  return key;
+};

@@ -8,6 +8,7 @@ export type RuntimeConfig = {
     base_url?: string;
     default_model?: string;
   };
+  perplexity?: {key?: string};
 };
 
 export type RequestWithRawBody = Request & {rawBody?: Buffer};

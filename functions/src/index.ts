@@ -4,10 +4,11 @@ import {withCorsAndErrorHandling} from "./middleware/errorHandler";
 import {handleChatCompletion} from "./services/openai/handler";
 import {handleGeminiChat} from "./services/gemini/handler";
 import {handleWhisper} from "./services/whisper/handler";
+import {handlePerplexitySearch} from "./services/perplexity/handler";
 
 setGlobalOptions({
   maxInstances: 10,
-  secrets: ["OPENAI_API_KEY", "GEMINI_API_KEY"],
+  secrets: ["OPENAI_API_KEY", "GEMINI_API_KEY", "PERPLEXITY_API_KEY"],
 });
 
 export const proxyWhisper = onRequest(
@@ -23,4 +24,9 @@ export const proxyGeminiChat = onRequest(
 export const proxyChatCompletion = onRequest(
   {timeoutSeconds: 300, memory: "1GiB"},
   withCorsAndErrorHandling(handleChatCompletion),
+);
+
+export const proxyPerplexitySearch = onRequest(
+  {timeoutSeconds: 300, memory: "1GiB"},
+  withCorsAndErrorHandling(handlePerplexitySearch),
 );
