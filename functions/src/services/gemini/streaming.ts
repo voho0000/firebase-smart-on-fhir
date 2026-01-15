@@ -1,94 +1,121 @@
 import type {Response} from "express";
-import {createGoogleGenerativeAI} from "@ai-sdk/google";
-import {streamText} from "ai";
+import axios from "axios";
 import * as logger from "firebase-functions/logger";
-import {getGeminiApiKey} from "../../config/runtime";
-import type {GeminiStreamOptions} from "./types";
+import {getGeminiApiKey, getGeminiBaseUrl} from "../../config/runtime";
 import type {ChatMessage} from "../../types/common";
 
 export const handleGeminiStreaming = async (
   model: string,
   normalizedMessages: ChatMessage[],
   generationConfig: Record<string, unknown> | undefined,
+  tools: unknown,
+  toolConfig: unknown,
+  safetySettings: unknown,
+  responseSchema: unknown,
+  responseMimeType: unknown,
   res: Response,
 ): Promise<void> => {
   const apiKey = getGeminiApiKey();
-  const google = createGoogleGenerativeAI({apiKey});
-  const geminiModel = google(model);
+  const baseUrl = getGeminiBaseUrl();
 
-  const streamOptions: GeminiStreamOptions = {
-    model: geminiModel,
-    messages: normalizedMessages as Array<{
-      role: "user" | "assistant" | "system";
-      content: string;
-    }>,
-  };
+  const systemMessages = normalizedMessages.filter(
+    (message) => message.role === "system",
+  );
+  const conversationMessages = normalizedMessages.filter(
+    (message) => message.role !== "system",
+  );
+
+  const contents = conversationMessages.map((message) => ({
+    role: message.role === "assistant" ? "model" : "user",
+    parts: [{text: message.content}],
+  }));
+
+  const requestBody: Record<string, unknown> = {contents};
+
+  if (systemMessages.length > 0) {
+    requestBody.systemInstruction = {
+      role: "system",
+      parts: [{
+        text: systemMessages.map((message) => message.content).join("\n"),
+      }],
+    };
+  }
 
   if (generationConfig) {
-    if (typeof generationConfig.temperature === "number") {
-      streamOptions.temperature = generationConfig.temperature;
-    }
-
-    if (typeof generationConfig.maxOutputTokens === "number") {
-      streamOptions.maxTokens = generationConfig.maxOutputTokens;
-    }
-
-    if (typeof generationConfig.topP === "number") {
-      streamOptions.topP = generationConfig.topP;
-    }
-
-    if (typeof generationConfig.topK === "number") {
-      streamOptions.topK = generationConfig.topK;
-    }
+    requestBody.generationConfig = generationConfig;
   }
 
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  if (Array.isArray(safetySettings)) {
+    requestBody.safetySettings = safetySettings;
+  }
+
+  if (Array.isArray(tools)) {
+    requestBody.tools = tools;
+  }
+
+  if (toolConfig !== undefined) {
+    requestBody.toolConfig = toolConfig;
+  }
+
+  if (responseSchema !== undefined) {
+    requestBody.responseSchema = responseSchema;
+  }
+
+  if (typeof responseMimeType === "string") {
+    requestBody.responseMimeType = responseMimeType;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Vercel-AI-Data-Stream", "v1");
   res.setHeader("Transfer-Encoding", "chunked");
 
-  const result = await streamText(streamOptions);
-
   try {
-    for await (const chunk of result.fullStream) {
-      if (chunk.type === "text-delta") {
-        if (!res.writableEnded) {
-          try {
-            res.write(`0:${JSON.stringify(chunk.text)}\n`);
-            const resWithFlush = res as Response & {flush?: () => void};
-            if (typeof resWithFlush.flush === "function") {
-              resWithFlush.flush();
-            }
-          } catch (writeError) {
-            logger.info("Client disconnected, stopping stream");
-            break;
+    const response = await axios.post(
+      `${baseUrl}/models/${model}:streamGenerateContent`,
+      requestBody,
+      {
+        params: {key: apiKey, alt: "sse"},
+        headers: {"Content-Type": "application/json"},
+        responseType: "stream",
+      },
+    );
+
+    response.data.on("data", (chunk: Buffer) => {
+      if (!res.writableEnded) {
+        try {
+          res.write(chunk);
+          const resWithFlush = res as Response & {flush?: () => void};
+          if (typeof resWithFlush.flush === "function") {
+            resWithFlush.flush();
           }
-        } else {
-          break;
-        }
-      } else if (chunk.type === "finish") {
-        if (!res.writableEnded) {
-          try {
-            res.write(`d:{"finishReason":"${chunk.finishReason}"}\n`);
-          } catch (writeError) {
-            break;
-          }
+        } catch (writeError) {
+          logger.info("Client disconnected, stopping stream");
+          response.data.destroy();
         }
       }
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes("write after end") ||
-        errorMessage.includes("EPIPE") ||
-        errorMessage.includes("ECONNRESET")) {
-      logger.info("Stream interrupted by client disconnect");
-    } else {
-      throw error;
-    }
-  }
+    });
 
-  if (!res.writableEnded) {
-    res.end();
+    response.data.on("end", () => {
+      if (!res.writableEnded) {
+        res.end();
+      }
+    });
+
+    response.data.on("error", (error: Error) => {
+      logger.error("Gemini stream error:", error);
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({error: error.message})}\n\n`);
+        res.end();
+      }
+    });
+  } catch (error) {
+    logger.error("Gemini streaming request failed:", error);
+    if (!res.writableEnded) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      res.write(`data: ${JSON.stringify({error: errorMessage})}\n\n`);
+      res.end();
+    }
   }
 };

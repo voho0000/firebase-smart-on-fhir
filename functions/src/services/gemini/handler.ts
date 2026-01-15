@@ -125,6 +125,11 @@ export const handleGeminiChat = async (
       model,
       normalizedMessages,
       generationConfig,
+      tools,
+      toolConfig,
+      safetySettings,
+      responseSchema,
+      responseMimeType,
       res,
     );
   } else {
