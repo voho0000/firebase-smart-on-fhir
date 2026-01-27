@@ -1,17 +1,22 @@
 import type {Response} from "express";
 import axios from "axios";
 import {getOpenAiApiKey, getOpenAiBaseUrl} from "../../config/runtime";
+import type {ChatMessage} from "../../types/common";
+import {transformMessagesForOpenAI} from "./utils";
 
 export const handleOpenAIStreaming = async (
   model: string,
-  normalizedMessages: Array<{
-    role: "user" | "assistant" | "system";
-    content: string;
-  }>,
+  normalizedMessages: ChatMessage[],
   chatRequest: Record<string, unknown>,
   res: Response,
 ): Promise<void> => {
   const apiKey = getOpenAiApiKey();
+
+  const transformedMessages = transformMessagesForOpenAI(normalizedMessages);
+  const requestWithTransformedMessages = {
+    ...chatRequest,
+    messages: transformedMessages,
+  };
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -21,7 +26,7 @@ export const handleOpenAIStreaming = async (
   try {
     const response = await axios.post(
       `${getOpenAiBaseUrl()}/chat/completions`,
-      chatRequest,
+      requestWithTransformedMessages,
       {
         headers: {
           "Authorization": `Bearer ${apiKey}`,

@@ -8,7 +8,7 @@ import {
   buildMessages,
   normalizeChatMessages,
 } from "../../utils/parser";
-import {sanitizeChatPayload} from "./utils";
+import {sanitizeChatPayload, transformMessagesForOpenAI} from "./utils";
 import {handleOpenAIStreaming} from "./streaming";
 
 export const handleChatCompletion = async (
@@ -45,7 +45,8 @@ export const handleChatCompletion = async (
   }
 
   const normalizedMessages = normalizeChatMessages(messages);
-  let chatRequest = sanitizeChatPayload(payload, messages);
+  const transformedMessages = transformMessagesForOpenAI(normalizedMessages);
+  let chatRequest = sanitizeChatPayload(payload, transformedMessages);
 
   const model = chatRequest.model || "gpt-5-mini";
   const requestedTemp = chatRequest.temperature;
@@ -70,10 +71,7 @@ export const handleChatCompletion = async (
   if (isStreaming) {
     await handleOpenAIStreaming(
       model as string,
-      normalizedMessages as Array<{
-        role: "user" | "assistant" | "system";
-        content: string;
-      }>,
+      normalizedMessages,
       chatRequest,
       res,
     );

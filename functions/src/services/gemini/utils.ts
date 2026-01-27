@@ -1,4 +1,38 @@
 import {toNumber} from "../../utils/parser";
+import type {ChatMessage} from "../../types/common";
+
+export const transformMessagesForGemini = (
+  messages: ChatMessage[],
+): Array<{role: string; parts: Array<Record<string, unknown>>}> => {
+  return messages
+    .filter((msg) => msg.role !== "system")
+    .map((msg) => {
+      const parts: Array<Record<string, unknown>> = [
+        {text: msg.content},
+      ];
+
+      if (msg.images && msg.images.length > 0) {
+        for (const img of msg.images) {
+          const base64Match = img.data.match(/^data:([^;]+);base64,(.+)$/);
+          if (base64Match) {
+            const mimeType = base64Match[1];
+            const data = base64Match[2];
+            parts.push({
+              inline_data: {
+                mime_type: mimeType,
+                data: data,
+              },
+            });
+          }
+        }
+      }
+
+      return {
+        role: msg.role === "assistant" ? "model" : "user",
+        parts,
+      };
+    });
+};
 
 export const buildGeminiGenerationConfig = (
   payload: Record<string, unknown>,

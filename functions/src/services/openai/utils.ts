@@ -1,4 +1,36 @@
 import {ALLOWED_MODEL_IDS, ALLOWED_OPENAI_KEYS} from "../../config/constants";
+import type {ChatMessage} from "../../types/common";
+
+export const transformMessagesForOpenAI = (
+  messages: ChatMessage[],
+): Array<{role: string; content: string | Array<Record<string, unknown>>}> => {
+  return messages.map((msg) => {
+    if (msg.images && msg.images.length > 0) {
+      const content: Array<Record<string, unknown>> = [
+        {type: "text", text: msg.content},
+      ];
+
+      for (const img of msg.images) {
+        content.push({
+          type: "image_url",
+          image_url: {
+            url: img.data,
+          },
+        });
+      }
+
+      return {
+        role: msg.role,
+        content,
+      };
+    }
+
+    return {
+      role: msg.role,
+      content: msg.content,
+    };
+  });
+};
 
 export const sanitizeChatPayload = (
   payload: Record<string, unknown>,

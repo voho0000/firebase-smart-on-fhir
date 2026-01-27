@@ -19,7 +19,13 @@ export type UploadedFileInfo = {
   mimeType?: string;
 };
 
+export type ChatImage = {
+  data: string;
+  mimeType?: string;
+};
+
 export type ChatMessage = {
   role: string;
   content: string;
+  images?: ChatImage[];
 };

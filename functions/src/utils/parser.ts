@@ -82,7 +82,24 @@ export const normalizeChatMessages = (messages: unknown[]): ChatMessage[] =>
         const content = toPlainText(rawContent);
 
         if (content) {
-          return {role, content};
+          const normalized: ChatMessage = {role, content};
+
+          const rawImages = (message as {images?: unknown}).images;
+          if (Array.isArray(rawImages) && rawImages.length > 0) {
+            normalized.images = rawImages
+              .filter((img) =>
+                typeof img === "object" &&
+                img !== null &&
+                "data" in img &&
+                typeof (img as {data?: unknown}).data === "string"
+              )
+              .map((img) => ({
+                data: (img as {data: string}).data,
+                mimeType: (img as {mimeType?: string}).mimeType,
+              }));
+          }
+
+          return normalized;
         }
       }
 

@@ -3,6 +3,7 @@ import axios from "axios";
 import * as logger from "firebase-functions/logger";
 import {getGeminiApiKey, getGeminiBaseUrl} from "../../config/runtime";
 import type {ChatMessage} from "../../types/common";
+import {transformMessagesForGemini} from "./utils";
 
 export const handleGeminiStreaming = async (
   model: string,
@@ -21,14 +22,8 @@ export const handleGeminiStreaming = async (
   const systemMessages = normalizedMessages.filter(
     (message) => message.role === "system",
   );
-  const conversationMessages = normalizedMessages.filter(
-    (message) => message.role !== "system",
-  );
 
-  const contents = conversationMessages.map((message) => ({
-    role: message.role === "assistant" ? "model" : "user",
-    parts: [{text: message.content}],
-  }));
+  const contents = transformMessagesForGemini(normalizedMessages);
 
   const requestBody: Record<string, unknown> = {contents};
 

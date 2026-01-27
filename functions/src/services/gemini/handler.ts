@@ -16,6 +16,7 @@ import {
   buildGeminiGenerationConfig,
   extractRequestedTemperature,
   extractGeminiText,
+  transformMessagesForGemini,
 } from "./utils";
 import {handleGeminiStreaming} from "./streaming";
 
@@ -62,14 +63,8 @@ export const handleGeminiChat = async (
   const systemMessages = normalizedMessages.filter(
     (message) => message.role === "system",
   );
-  const conversationMessages = normalizedMessages.filter(
-    (message) => message.role !== "system",
-  );
 
-  const contents = conversationMessages.map((message) => ({
-    role: message.role === "assistant" ? "model" : "user",
-    parts: [{text: message.content}],
-  }));
+  const contents = transformMessagesForGemini(normalizedMessages);
 
   if (contents.length === 0) {
     res.status(400).json({error: "No user or assistant messages found"});
