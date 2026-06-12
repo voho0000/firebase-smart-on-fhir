@@ -1,4 +1,10 @@
 {
+  "firestore": [
+    {
+      "database": "mediprisma",
+      "rules": "firestore.rules"
+    }
+  ],
   "functions": [
     {
       "source": "functions",
