@@ -27,11 +27,16 @@ export const corsHandler = cors({
   },
   methods: ["POST", "OPTIONS"],
   // Authorization carries the Firebase ID token (audit A6) — without it here
-  // the browser preflight rejects every authenticated proxy call
+  // the browser preflight rejects every authenticated proxy call.
+  // anthropic-version / anthropic-beta are added by the @ai-sdk/anthropic
+  // client on every request; omitting them made every Claude proxy call fail
+  // CORS preflight ("Failed to fetch").
   allowedHeaders: [
     "Content-Type",
     "Authorization",
     "x-proxy-key",
     "x-client-key",
+    "anthropic-version",
+    "anthropic-beta",
   ],
 });
