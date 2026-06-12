@@ -20,6 +20,7 @@ import {
   transformMessagesForGemini,
 } from "./utils";
 import {handleGeminiStreaming} from "./streaming";
+import {isNativeGeminiBody, handleGeminiPassthrough} from "./passthrough";
 
 export const handleGeminiChat = async (
   req: Request,
@@ -54,6 +55,15 @@ export const handleGeminiChat = async (
   }
 
   const payload = parseJsonBody(req);
+
+  // Native AI-SDK body (contents[] with tool parts) → forward to Google
+  // verbatim so multi-step tool loops survive (the legacy flatten below
+  // drops functionCall/functionResponse parts).
+  if (isNativeGeminiBody(payload)) {
+    await handleGeminiPassthrough(payload, res);
+    return;
+  }
+
   const rawMessages = buildMessages(payload);
 
   if (!rawMessages) {
