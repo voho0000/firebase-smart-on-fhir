@@ -54,7 +54,7 @@ export const sanitizeChatPayload = (
   }
 
   if (!sanitized.model) {
-    sanitized.model = "gpt-5-mini";
+    sanitized.model = "gpt-5.4-nano";
   }
 
   if (sanitized.temperature === undefined) {

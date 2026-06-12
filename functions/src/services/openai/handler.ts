@@ -10,6 +10,7 @@ import {
   normalizeChatMessages,
 } from "../../utils/parser";
 import {sanitizeChatPayload, transformMessagesForOpenAI} from "./utils";
+import {isNativeOpenAiBody, handleOpenAiPassthrough} from "./passthrough";
 import {handleOpenAIStreaming} from "./streaming";
 
 export const handleChatCompletion = async (
@@ -45,6 +46,15 @@ export const handleChatCompletion = async (
   }
 
   const payload = parseJsonBody(req);
+
+  // Native AI-SDK body (tool_calls / role:"tool" / multimodal content) →
+  // forward verbatim so multi-step tool loops survive (the legacy normalize
+  // path below strips tool_calls and tool_call_id, 400ing OpenAI).
+  if (isNativeOpenAiBody(payload)) {
+    await handleOpenAiPassthrough(payload, res);
+    return;
+  }
+
   const messages = buildMessages(payload);
 
   if (!messages) {
