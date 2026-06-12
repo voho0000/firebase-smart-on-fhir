@@ -33,7 +33,7 @@ export const handlePerplexitySearch = async (
   if (!uid) {
     return;
   }
-  if (!(await checkAndConsumeQuota(uid, res))) {
+  if (!(await checkAndConsumeQuota(uid, res, "perplexity"))) {
     return;
   }
 

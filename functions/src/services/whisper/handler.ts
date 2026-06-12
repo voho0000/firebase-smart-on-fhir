@@ -141,7 +141,7 @@ export const handleWhisper = async (
   if (!uid) {
     return;
   }
-  if (!(await checkAndConsumeQuota(uid, res))) {
+  if (!(await checkAndConsumeQuota(uid, res, "whisper"))) {
     return;
   }
 
