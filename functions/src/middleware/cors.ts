@@ -26,5 +26,5 @@ export const corsHandler = cors({
     callback(new Error("Not allowed by CORS"));
   },
   methods: ["POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-proxy-key"],
+  allowedHeaders: ["Content-Type", "x-proxy-key", "x-client-key"],
 });
