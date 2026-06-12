@@ -26,5 +26,12 @@ export const corsHandler = cors({
     callback(new Error("Not allowed by CORS"));
   },
   methods: ["POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-proxy-key", "x-client-key"],
+  // Authorization carries the Firebase ID token (audit A6) — without it here
+  // the browser preflight rejects every authenticated proxy call
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "x-proxy-key",
+    "x-client-key",
+  ],
 });

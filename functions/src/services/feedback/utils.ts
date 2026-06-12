@@ -1,4 +1,25 @@
 /**
+ * HTML-escape a value before interpolating into the email template.
+ * Every request field is attacker-controlled.
+ * @param {unknown} value - Raw value.
+ * @return {string} Escaped string.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Badge CSS classes must come from these allowlists, never raw input
+export const ISSUE_TYPES = new Set(
+  ["bug", "ui", "performance", "feature", "other"],
+);
+export const SEVERITIES = new Set(["low", "medium", "high", "critical"]);
+
+/**
  * Get localized label for issue type.
  * @param {string} type - Issue type code.
  * @return {string} Localized label.
@@ -52,11 +73,12 @@ export function generateEmailHTML(
     language: string;
     currentPath: string;
     fhirServerUrl: string;
-    patientId: string;
   },
 ): string {
   const issueTypeLabel = getIssueTypeLabel(issueType);
   const severityLabel = getSeverityLabel(severity);
+  const issueTypeClass = ISSUE_TYPES.has(issueType) ? issueType : "other";
+  const severityClass = SEVERITIES.has(severity) ? severity : "medium";
   const timestampFormatted = new Date(
     systemInfo.timestamp,
   ).toLocaleString("zh-TW", {timeZone: "Asia/Taipei"});
@@ -131,17 +153,21 @@ export function generateEmailHTML(
     
     <div class="content">
       <div class="section">
-        <span class="label">回報者 Email:</span> ${email}
+        <span class="label">回報者 Email:</span> ${escapeHtml(email)}
       </div>
       
       <div class="section">
         <span class="label">問題類型:</span> 
-        <span class="badge badge-${issueType}">${issueTypeLabel}</span>
+        <span class="badge badge-${issueTypeClass}">${
+  escapeHtml(issueTypeLabel)
+}</span>
       </div>
       
       <div class="section">
         <span class="label">嚴重程度:</span> 
-        <span class="badge badge-${severity}">${severityLabel}</span>
+        <span class="badge badge-${severityClass}">${
+  escapeHtml(severityLabel)
+}</span>
       </div>
       
       <div class="section">
@@ -152,7 +178,7 @@ export function generateEmailHTML(
           background: white;
           padding: 12px;
           border-radius: 6px;
-        ">${description}</div>
+        ">${escapeHtml(description)}</div>
       </div>
       
       ${steps ? `
@@ -164,20 +190,27 @@ export function generateEmailHTML(
           background: white;
           padding: 12px;
           border-radius: 6px;
-        ">${steps}</div>
+        ">${escapeHtml(steps)}</div>
       </div>
       ` : ""}
       
       <div class="section">
         <span class="label">系統資訊:</span>
         <div class="system-info">
-          <div><strong>時間:</strong> ${timestampFormatted}</div>
-          <div><strong>瀏覽器:</strong> ${systemInfo.userAgent}</div>
-          <div><strong>螢幕解析度:</strong> ${systemInfo.screenResolution}</div>
-          <div><strong>語言:</strong> ${systemInfo.language}</div>
-          <div><strong>當前頁面:</strong> ${systemInfo.currentPath}</div>
-          <div><strong>FHIR Server:</strong> ${systemInfo.fhirServerUrl}</div>
-          <div><strong>患者 ID:</strong> ${systemInfo.patientId}</div>
+          <div><strong>時間:</strong> ${escapeHtml(timestampFormatted)}</div>
+          <div><strong>瀏覽器:</strong> ${
+  escapeHtml(systemInfo.userAgent)
+}</div>
+          <div><strong>螢幕解析度:</strong> ${
+  escapeHtml(systemInfo.screenResolution)
+}</div>
+          <div><strong>語言:</strong> ${escapeHtml(systemInfo.language)}</div>
+          <div><strong>當前頁面:</strong> ${
+  escapeHtml(systemInfo.currentPath)
+}</div>
+          <div><strong>FHIR Server:</strong> ${
+  escapeHtml(systemInfo.fhirServerUrl)
+}</div>
         </div>
       </div>
     </div>
@@ -215,7 +248,6 @@ export function generatePlainText(
     language: string;
     currentPath: string;
     fhirServerUrl: string;
-    patientId: string;
   },
 ): string {
   const issueTypeLabel = getIssueTypeLabel(issueType);
@@ -244,7 +276,6 @@ ${steps ? `重現步驟:\n${steps}\n` : ""}
 - 語言: ${systemInfo.language}
 - 當前頁面: ${systemInfo.currentPath}
 - FHIR Server: ${systemInfo.fhirServerUrl}
-- 患者 ID: ${systemInfo.patientId}
 
 ---
 此郵件由 MediPrisma 系統自動發送

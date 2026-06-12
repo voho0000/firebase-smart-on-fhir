@@ -11,6 +11,5 @@ export interface FeedbackRequest {
     language: string;
     currentPath: string;
     fhirServerUrl: string;
-    patientId: string;
   };
 }

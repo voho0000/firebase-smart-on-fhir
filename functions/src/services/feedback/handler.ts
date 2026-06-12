@@ -11,6 +11,25 @@ import {
   generatePlainText,
 } from "./utils";
 
+// Per-instance rate bucket — not globally exact on serverless, but caps a
+// single source's email flood at a handful per hour instead of unlimited
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const RATE_LIMIT_MAX = 5;
+const rateBuckets = new Map<string, {count: number; resetAt: number}>();
+
+const isRateLimited = (ip: string): boolean => {
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    rateBuckets.set(ip, {count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS});
+    return false;
+  }
+  bucket.count += 1;
+  return bucket.count > RATE_LIMIT_MAX;
+};
+
+const MAX_FIELD_LENGTH = 5000;
+
 export const handleFeedback = async (
   req: Request,
   res: Response,
@@ -25,6 +44,13 @@ export const handleFeedback = async (
     return;
   }
 
+  const ip =
+    req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (isRateLimited(ip)) {
+    res.status(429).json({error: "Too many requests"});
+    return;
+  }
+
   try {
     const payload = parseJsonBody(req);
     const body = payload as unknown as FeedbackRequest;
@@ -36,19 +62,26 @@ export const handleFeedback = async (
       return;
     }
 
+    if (
+      String(email).length > 320 ||
+      String(description).length > MAX_FIELD_LENGTH ||
+      String(steps ?? "").length > MAX_FIELD_LENGTH
+    ) {
+      res.status(413).json({error: "Payload too large"});
+      return;
+    }
+
     const resendApiKey = process.env.RESEND_API_KEY;
 
     if (!resendApiKey) {
-      logger.warn("RESEND_API_KEY not configured");
-      logger.info("Feedback submission (no email sent):", {
-        email,
-        issueType,
-        severity,
-        description: description.substring(0, 100) + "...",
-      });
+      logger.warn(
+        "RESEND_API_KEY not configured — feedback received but no email sent",
+        {issueType, severity},
+      );
 
       res.status(200).json({
         success: true,
+        emailSent: false,
         message: "Feedback received (email not configured)",
       });
       return;
@@ -89,25 +122,17 @@ export const handleFeedback = async (
     });
 
     if (error) {
+      // Details stay in server logs; callers get a generic error
       logger.error("Resend SDK error:", error);
-      res.status(500).json({
-        error: "Internal server error",
-        details: error.message,
-      });
+      res.status(500).json({error: "Internal server error"});
       return;
     }
 
-    logger.info("Feedback email sent successfully:", data);
+    logger.info("Feedback email sent, id:", data?.id);
 
-    res.status(200).json({success: true});
+    res.status(200).json({success: true, emailSent: true});
   } catch (error) {
     logger.error("Feedback handler error:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
-
-    res.status(500).json({
-      error: "Internal server error",
-      details: errorMessage,
-    });
+    res.status(500).json({error: "Internal server error"});
   }
 };

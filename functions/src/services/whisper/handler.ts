@@ -4,7 +4,8 @@ import Busboy from "busboy";
 import FormData from "form-data";
 import {PassThrough} from "stream";
 import {getOpenAiApiKey, getOpenAiBaseUrl} from "../../config/runtime";
-import {verifyClientKey} from "../../middleware/auth";
+import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
+import {checkAndConsumeQuota} from "../../middleware/quota";
 import type {RequestWithRawBody, UploadedFileInfo} from "../../types/common";
 
 type TranscriptionResponse = {
@@ -132,6 +133,15 @@ export const handleWhisper = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  // Owner-funded proxy: signed-in users only, metered per uid (audit A6)
+  const uid = await verifyFirebaseIdToken(req, res);
+  if (!uid) {
+    return;
+  }
+  if (!(await checkAndConsumeQuota(uid, res))) {
     return;
   }
 

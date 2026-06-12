@@ -35,9 +35,12 @@ export const handleError = (error: unknown, res: Response): void => {
       details,
     });
 
+    // The curated upstream message (e.g. "maximum context length…") is useful
+    // to surface; the raw details payload is logged above but never echoed —
+    // it can carry internal request/config info (audit FB5)
     res
       .status(status)
-      .json({error: openAiMessage ?? axiosError.message, details});
+      .json({error: openAiMessage ?? "Upstream request failed"});
     return;
   }
 
@@ -48,7 +51,7 @@ export const handleError = (error: unknown, res: Response): void => {
     stack: error instanceof Error ? error.stack : undefined,
   });
 
-  res.status(500).json({error: message});
+  res.status(500).json({error: "Internal server error"});
 };
 
 export const withCorsAndErrorHandling =

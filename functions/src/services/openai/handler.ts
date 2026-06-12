@@ -2,7 +2,8 @@ import type {Request, Response} from "express";
 import axios from "axios";
 import * as logger from "firebase-functions/logger";
 import {getOpenAiApiKey, getOpenAiBaseUrl} from "../../config/runtime";
-import {verifyClientKey} from "../../middleware/auth";
+import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
+import {checkAndConsumeQuota} from "../../middleware/quota";
 import {
   parseJsonBody,
   buildMessages,
@@ -22,6 +23,15 @@ export const handleChatCompletion = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  // Owner-funded proxy: signed-in users only, metered per uid (audit A6)
+  const uid = await verifyFirebaseIdToken(req, res);
+  if (!uid) {
+    return;
+  }
+  if (!(await checkAndConsumeQuota(uid, res))) {
     return;
   }
 
