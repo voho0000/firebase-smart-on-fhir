@@ -88,10 +88,20 @@ export const handleGeminiChat = async (
   const responseSchema = payload["responseSchema"];
   const responseMimeType = payload["responseMimeType"];
 
-  const model =
+  // Proxy tier: only the default (cheapest) Gemini runs on the owner's key.
+  // Pre-existing hole: any model id in the payload was forwarded verbatim,
+  // so proxy users could bill pro-tier models to the server key.
+  const requestedModel =
     typeof payload["model"] === "string" && payload["model"].trim() ?
       payload["model"] as string :
+      undefined;
+  const model =
+    requestedModel && requestedModel === getGeminiDefaultModel() ?
+      requestedModel :
       getGeminiDefaultModel();
+  if (requestedModel && requestedModel !== model) {
+    logger.info(`Forcing Gemini model ${requestedModel} -> ${model}`);
+  }
 
   const requestedTemperature = extractRequestedTemperature(
     payload,

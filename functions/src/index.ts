@@ -6,6 +6,7 @@ import {handleGeminiChat} from "./services/gemini/handler";
 import {handleWhisper} from "./services/whisper/handler";
 import {handlePerplexitySearch} from "./services/perplexity/handler";
 import {handleFeedback} from "./services/feedback/handler";
+import {handleClaudeChat} from "./services/claude/handler";
 
 setGlobalOptions({
   maxInstances: 10,
@@ -13,6 +14,7 @@ setGlobalOptions({
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",
     "PERPLEXITY_API_KEY",
+    "ANTHROPIC_API_KEY",
     "RESEND_API_KEY",
   ],
 });
@@ -35,6 +37,11 @@ export const proxyChatCompletion = onRequest(
 export const proxyPerplexitySearch = onRequest(
   {timeoutSeconds: 300, memory: "1GiB"},
   withCorsAndErrorHandling(handlePerplexitySearch),
+);
+
+export const proxyClaudeChat = onRequest(
+  {timeoutSeconds: 300, memory: "1GiB"},
+  withCorsAndErrorHandling(handleClaudeChat),
 );
 
 export const sendFeedback = onRequest(

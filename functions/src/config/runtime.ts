@@ -124,7 +124,7 @@ export const getGeminiBaseUrl = (): string =>
 export const getGeminiDefaultModel = (): string =>
   getRuntimeConfig().gemini?.default_model ??
   process.env.GEMINI_DEFAULT_MODEL ??
-  "gemini-3.0-flash";
+  DEFAULT_GEMINI_MODEL;
 
 export const getPerplexityApiKey = (): string | undefined => {
   const runtime = getRuntimeConfig();

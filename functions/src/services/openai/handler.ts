@@ -58,17 +58,18 @@ export const handleChatCompletion = async (
   const transformedMessages = transformMessagesForOpenAI(normalizedMessages);
   let chatRequest = sanitizeChatPayload(payload, transformedMessages);
 
-  const model = chatRequest.model || "gpt-5-mini";
+  const model = chatRequest.model || "gpt-5.4-nano";
   const requestedTemp = chatRequest.temperature;
 
   if (
     typeof requestedTemp === "number" &&
     requestedTemp !== 1 &&
-    model === "gpt-5-mini"
+    typeof model === "string" &&
+    model.startsWith("gpt-5")
   ) {
     logger.info(
       `Overriding temperature from ${requestedTemp} to 1 ` +
-      "for gpt-5-mini model",
+      `for ${model}`,
     );
     chatRequest = {
       ...chatRequest,
