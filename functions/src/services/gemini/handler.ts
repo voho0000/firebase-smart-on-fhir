@@ -36,12 +36,12 @@ export const handleGeminiChat = async (
     return;
   }
 
-  // Owner-funded proxy: signed-in users only, metered per uid (audit A6)
-  const uid = await verifyFirebaseIdToken(req, res);
-  if (!uid) {
+  // Owner-funded proxy: signed-in (or anonymous) users, metered per uid (A6)
+  const auth = await verifyFirebaseIdToken(req, res);
+  if (!auth) {
     return;
   }
-  if (!(await checkAndConsumeQuota(uid, res))) {
+  if (!(await checkAndConsumeQuota(auth.uid, res, "chat", auth.isAnonymous))) {
     return;
   }
 

@@ -33,6 +33,12 @@ export const verifyClientKey = (req: Request, res: Response): boolean => {
   return true;
 };
 
+/** A verified caller. Anonymous = signed in via Firebase anonymous auth. */
+export interface AuthedUser {
+  uid: string;
+  isAnonymous: boolean;
+}
+
 /**
  * Real authentication for the owner-funded LLM proxies (audit A6).
  *
@@ -42,14 +48,19 @@ export const verifyClientKey = (req: Request, res: Response): boolean => {
  * returned 400 payload errors, never 401). A Firebase ID token proves a
  * signed-in user and gives us a uid to meter quota against.
  *
+ * Anonymous tokens (the app mints one for not-signed-in visitors so the free
+ * model works without a login) are accepted too, but flagged isAnonymous so
+ * the quota layer can give them a smaller free allowance.
+ *
  * @param {Request} req - Incoming request.
  * @param {Response} res - Response (written on auth failure).
- * @return {Promise<string | null>} The uid, or null after responding 401.
+ * @return {Promise<AuthedUser | null>} The caller, or null after responding
+ *   401.
  */
 export const verifyFirebaseIdToken = async (
   req: Request,
   res: Response,
-): Promise<string | null> => {
+): Promise<AuthedUser | null> => {
   const authHeader = req.header("authorization") ?? "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
 
@@ -64,7 +75,8 @@ export const verifyFirebaseIdToken = async (
   try {
     ensureAdminApp();
     const decoded = await getAuth().verifyIdToken(match[1]);
-    return decoded.uid;
+    const isAnonymous = decoded.firebase?.sign_in_provider === "anonymous";
+    return {uid: decoded.uid, isAnonymous};
   } catch (error) {
     logger.warn("ID token verification failed", {
       message: error instanceof Error ? error.message : String(error),

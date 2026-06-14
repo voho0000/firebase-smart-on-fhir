@@ -28,12 +28,13 @@ export const handlePerplexitySearch = async (
     return;
   }
 
-  // Owner-funded proxy: signed-in users only, metered per uid (audit A6)
-  const uid = await verifyFirebaseIdToken(req, res);
-  if (!uid) {
+  // Owner-funded proxy: signed-in (or anonymous) users, metered per uid (A6)
+  const auth = await verifyFirebaseIdToken(req, res);
+  if (!auth) {
     return;
   }
-  if (!(await checkAndConsumeQuota(uid, res, "perplexity"))) {
+  if (!(await checkAndConsumeQuota(
+    auth.uid, res, "perplexity", auth.isAnonymous))) {
     return;
   }
 

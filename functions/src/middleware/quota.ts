@@ -21,6 +21,16 @@ const LIMITS: Record<QuotaService, number> = {
   whisper: Number(process.env.QUOTA_DAILY_LIMIT_WHISPER ?? "50"),
 };
 
+// Anonymous (not-signed-in) visitors get a smaller free allowance than
+// signed-in users. Anonymous uids are disposable — clearing the browser mints
+// a fresh one — so this is a soft speed-bump to bound the owner's bill, not
+// strict metering; it's enough to let visitors try the tool before signing in.
+const ANON_LIMITS: Record<QuotaService, number> = {
+  chat: Number(process.env.QUOTA_ANON_LIMIT ?? "50"),
+  perplexity: Number(process.env.QUOTA_ANON_LIMIT_PERPLEXITY ?? "10"),
+  whisper: Number(process.env.QUOTA_ANON_LIMIT_WHISPER ?? "10"),
+};
+
 // Field names inside the daily usage doc. "count" is chat — the app's quota
 // display reads that exact field, so it must keep its name.
 const FIELDS: Record<QuotaService, string> = {
@@ -48,17 +58,19 @@ const todayString = (): string => new Date().toISOString().split("T")[0];
  * @param {string} uid - Authenticated user id.
  * @param {Response} res - Response (written on quota exhaustion).
  * @param {QuotaService} service - Which per-service bucket to charge.
+ * @param {boolean} isAnonymous - Anonymous callers get the smaller ANON_LIMITS.
  * @return {Promise<boolean>} Whether the request may proceed.
  */
 export const checkAndConsumeQuota = async (
   uid: string,
   res: Response,
   service: QuotaService = "chat",
+  isAnonymous = false,
 ): Promise<boolean> => {
   ensureAdminApp();
   const db = getFirestore(DATABASE_ID);
   const today = todayString();
-  const limit = LIMITS[service];
+  const limit = (isAnonymous ? ANON_LIMITS : LIMITS)[service];
   const field = FIELDS[service];
   const ref = db
     .collection("users").doc(uid)

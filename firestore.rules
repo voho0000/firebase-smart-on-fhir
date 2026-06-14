@@ -1,6 +1,13 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // 真正登入的帳號（排除匿名）。匿名 token 是給未登入訪客用免費額度用的，
+    // uid 可拋棄，不該能寫入公開的分享內容。
+    function isRealUser() {
+      return request.auth != null
+             && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
       
@@ -25,22 +32,22 @@ service cloud.firestore {
       // 允許所有人讀取（包括未登入使用者）
       allow read: if true;
 
-      // 只有登入使用者可以建立，且 authorId 必須是自己（不可冒名）、
+      // 只有登入使用者（非匿名）可以建立，且 authorId 必須是自己（不可冒名）、
       // usageCount 必須從 0 開始
-      allow create: if request.auth != null
+      allow create: if isRealUser()
                     && request.resource.data.authorId == request.auth.uid
                     && request.resource.data.usageCount == 0;
 
       // 只有作者可以刪除
-      allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+      allow delete: if isRealUser() && request.auth.uid == resource.data.authorId;
 
       // 作者可以更新內容，但不可把 authorId 改成別人
-      allow update: if request.auth != null
+      allow update: if isRealUser()
                     && request.auth.uid == resource.data.authorId
                     && request.resource.data.authorId == resource.data.authorId;
 
-      // 任何登入用戶都可以更新 usageCount，但只能 +1（防止灌水或歸零）
-      allow update: if request.auth != null
+      // 任何登入用戶（非匿名）都可以更新 usageCount，但只能 +1（防止灌水或歸零）
+      allow update: if isRealUser()
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount'])
                     && request.resource.data.usageCount == resource.data.usageCount + 1;
     }
