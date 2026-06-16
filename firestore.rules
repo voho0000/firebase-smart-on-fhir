@@ -51,5 +51,11 @@ service cloud.firestore {
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount'])
                     && request.resource.data.usageCount == resource.data.usageCount + 1;
     }
+
+    // 由 feedback Function（admin SDK）寫入的防濫用限流桶。admin SDK 會略過
+    // 規則，但 client 不該讀寫——明確拒絕以防竄改。
+    match /feedbackRateLimits/{doc} {
+      allow read, write: if false;
+    }
   }
 }

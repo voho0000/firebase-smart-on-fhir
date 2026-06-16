@@ -1,4 +1,7 @@
 import type {Request, Response} from "express";
+import {createHash} from "crypto";
+import {getApps, initializeApp} from "firebase-admin/app";
+import {getFirestore, FieldValue} from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import {Resend} from "resend";
 import {verifyClientKey} from "../../middleware/auth";
@@ -11,21 +14,72 @@ import {
   generatePlainText,
 } from "./utils";
 
-// Per-instance rate bucket — not globally exact on serverless, but caps a
-// single source's email flood at a handful per hour instead of unlimited
+const DATABASE_ID = "mediprisma";
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_MAX = 5;
-const rateBuckets = new Map<string, {count: number; resetAt: number}>();
 
-const isRateLimited = (ip: string): boolean => {
-  const now = Date.now();
-  const bucket = rateBuckets.get(ip);
-  if (!bucket || now > bucket.resetAt) {
-    rateBuckets.set(ip, {count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS});
+const ensureAdminApp = () => {
+  if (getApps().length === 0) {
+    initializeApp();
+  }
+};
+
+// Hash the caller IP before storing it — we never persist a raw address.
+// The salt keeps the digest non-reversible if the collection ever leaks.
+const ipKey = (ip: string): string =>
+  createHash("sha256")
+    .update((process.env.RATE_LIMIT_SALT ?? "mediprisma-feedback") + ip)
+    .digest("hex")
+    .slice(0, 32);
+
+/**
+ * Durable per-IP feedback rate limit backed by Firestore. The previous
+ * in-memory Map reset on every new serverless instance / cold start, so a
+ * scripted flood could blow far past the intended 5/hour by spreading across
+ * instances. A Firestore counter is shared by all instances. Fails OPEN on any
+ * Firestore error — an infra hiccup must never block a real bug report.
+ * @param {string} ip - Caller IP (from x-forwarded-for).
+ * @return {Promise<boolean>} true when the caller is over the limit.
+ */
+const isRateLimited = async (ip: string): Promise<boolean> => {
+  ensureAdminApp();
+  try {
+    const db = getFirestore(DATABASE_ID);
+    const ref = db.collection("feedbackRateLimits").doc(ipKey(ip));
+    return await db.runTransaction(async (tx) => {
+      const now = Date.now();
+      const data = (await tx.get(ref)).data() as
+        | {count?: number; windowStart?: number}
+        | undefined;
+      const windowStart = data?.windowStart ?? 0;
+      const count = data?.count ?? 0;
+      // Window elapsed → reset the bucket and allow.
+      if (now - windowStart > RATE_LIMIT_WINDOW_MS) {
+        tx.set(ref, {
+          count: 1,
+          windowStart: now,
+          // For an optional Firestore TTL policy on `expireAt` to auto-purge.
+          expireAt: new Date(now + RATE_LIMIT_WINDOW_MS),
+          lastUpdated: FieldValue.serverTimestamp(),
+        });
+        return false;
+      }
+      if (count >= RATE_LIMIT_MAX) {
+        return true;
+      }
+      tx.set(
+        ref,
+        {count: count + 1, lastUpdated: FieldValue.serverTimestamp()},
+        {merge: true},
+      );
+      return false;
+    });
+  } catch (error) {
+    logger.error("Feedback rate-limit check failed — failing open", {
+      message: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
-  bucket.count += 1;
-  return bucket.count > RATE_LIMIT_MAX;
 };
 
 const MAX_FIELD_LENGTH = 5000;
@@ -46,7 +100,7 @@ export const handleFeedback = async (
 
   const ip =
     req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  if (isRateLimited(ip)) {
+  if (await isRateLimited(ip)) {
     res.status(429).json({error: "Too many requests"});
     return;
   }
