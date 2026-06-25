@@ -21,6 +21,7 @@ import {
 } from "./utils";
 import {handleGeminiStreaming} from "./streaming";
 import {isNativeGeminiBody, handleGeminiPassthrough} from "./passthrough";
+import {ALLOWED_GEMINI_MODEL_IDS} from "../../config/constants";
 
 export const handleGeminiChat = async (
   req: Request,
@@ -98,7 +99,7 @@ export const handleGeminiChat = async (
   const responseSchema = payload["responseSchema"];
   const responseMimeType = payload["responseMimeType"];
 
-  // Proxy tier: only the default (cheapest) Gemini runs on the owner's key.
+  // Proxy tier: only an allowlisted Gemini model runs on the owner's key.
   // Pre-existing hole: any model id in the payload was forwarded verbatim,
   // so proxy users could bill pro-tier models to the server key.
   const requestedModel =
@@ -106,7 +107,7 @@ export const handleGeminiChat = async (
       payload["model"] as string :
       undefined;
   const model =
-    requestedModel && requestedModel === getGeminiDefaultModel() ?
+    requestedModel && ALLOWED_GEMINI_MODEL_IDS.has(requestedModel) ?
       requestedModel :
       getGeminiDefaultModel();
   if (requestedModel && requestedModel !== model) {

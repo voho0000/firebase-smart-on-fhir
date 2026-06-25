@@ -5,7 +5,7 @@ import {getPerplexityApiKey} from "../../config/runtime";
 import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
 import {checkAndConsumeQuota} from "../../middleware/quota";
 import {parseJsonBody} from "../../utils/parser";
-import {buildPerplexityPayload} from "./utils";
+import {buildPerplexityPayload, isAuthoritativeUrl} from "./utils";
 import type {
   PerplexitySearchRequest,
   PerplexitySearchResponse,
@@ -33,10 +33,6 @@ export const handlePerplexitySearch = async (
   if (!auth) {
     return;
   }
-  if (!(await checkAndConsumeQuota(
-    auth.uid, res, "perplexity", auth.isAnonymous))) {
-    return;
-  }
 
   const payload = parseJsonBody(req) as unknown as PerplexitySearchRequest;
   const {query} = payload;
@@ -50,7 +46,24 @@ export const handlePerplexitySearch = async (
     return;
   }
 
-  const apiKey = getPerplexityApiKey();
+  // BYO key: when the caller supplies their own Perplexity key we authorize the
+  // upstream call with THEIR key (used transiently here — never logged or
+  // stored) and skip the owner-funded daily quota. With no user key we fall
+  // back to the server key and meter the call against the per-uid quota (A6).
+  const userKey =
+    typeof payload.perplexityKey === "string" ?
+      payload.perplexityKey.trim() :
+      "";
+  const usingUserKey = userKey.length > 0;
+
+  if (!usingUserKey) {
+    if (!(await checkAndConsumeQuota(
+      auth.uid, res, "perplexity", auth.isAnonymous))) {
+      return;
+    }
+  }
+
+  const apiKey = usingUserKey ? userKey : getPerplexityApiKey();
   if (!apiKey) {
     res.status(500).json({
       success: false,
@@ -66,6 +79,7 @@ export const handlePerplexitySearch = async (
     logger.info("Calling Perplexity API", {
       model: perplexityPayload.model,
       queryLength: query.length,
+      usingUserKey,
     });
 
     const response = await axios.post<PerplexityApiResponse>(
@@ -79,8 +93,26 @@ export const handlePerplexitySearch = async (
       },
     );
 
-    const content = response.data?.choices?.[0]?.message?.content || "";
-    const citations = response.data?.citations || [];
+    const content =
+      response.data?.choices?.[0]?.message?.content || "";
+
+    // Perplexity is migrating source URLs from the top-level `citations` array
+    // (frequently empty now) to `search_results`. Merge both (dedup, preserve
+    // order) so citation links survive whichever field is populated.
+    const directCitations = Array.isArray(response.data?.citations) ?
+      response.data.citations :
+      [];
+    const searchResultUrls = Array.isArray(response.data?.search_results) ?
+      response.data.search_results
+        .map((r) => r?.url)
+        .filter(
+          (u): u is string => typeof u === "string" && u.length > 0,
+        ) :
+      [];
+    // Drop any non-authoritative URLs that slipped past the search denylist so
+    // the rendered Sources list stays clinically credible.
+    const citations = [...new Set([...directCitations, ...searchResultUrls])]
+      .filter(isAuthoritativeUrl);
 
     const result: PerplexitySearchResponse = {
       success: true,
@@ -91,6 +123,8 @@ export const handlePerplexitySearch = async (
     logger.info("Perplexity API call successful", {
       contentLength: content.length,
       citationsCount: citations.length,
+      rawCitationsCount: directCitations.length,
+      searchResultsCount: searchResultUrls.length,
     });
 
     res.status(200).json(result);

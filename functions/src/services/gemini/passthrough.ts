@@ -6,6 +6,7 @@ import {
   getGeminiBaseUrl,
   getGeminiDefaultModel,
 } from "../../config/runtime";
+import {ALLOWED_GEMINI_MODEL_IDS} from "../../config/constants";
 
 // Native Gemini passthrough (audit C6 / Gemini agent-tool fix).
 //
@@ -34,8 +35,14 @@ export const handleGeminiPassthrough = async (
 ): Promise<void> => {
   const apiKey = getGeminiApiKey();
   const baseUrl = getGeminiBaseUrl();
-  // proxy tier — never trust the client-supplied model
-  const model = getGeminiDefaultModel();
+  // proxy tier — only an allowlisted model runs on the server key; anything
+  // else (including unset) falls back to the default so pro-tier models can't
+  // bill the owner.
+  const requestedModel =
+    typeof payload.model === "string" ? payload.model.trim() : "";
+  const model = ALLOWED_GEMINI_MODEL_IDS.has(requestedModel) ?
+    requestedModel :
+    getGeminiDefaultModel();
 
   const isStreaming = payload.__proxyStreaming === true;
 
