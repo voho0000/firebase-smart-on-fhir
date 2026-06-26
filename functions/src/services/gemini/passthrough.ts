@@ -86,8 +86,27 @@ export const handleGeminiPassthrough = async (
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Transfer-Encoding", "chunked");
+  res.setHeader("X-Accel-Buffering", "no");
+  // NOTE: do NOT set `Connection: keep-alive` or `Transfer-Encoding: chunked`.
+  // Browser↔Cloud Run runs over HTTP/2, where both are connection-specific
+  // headers FORBIDDEN by the spec (RFC 9113 §8.2.2). Strict clients — iOS
+  // Safari/WebKit, incl. Chrome on iOS — reject the whole response as malformed
+  // ("TypeError: Load failed"), while desktop Chrome tolerates it. OpenAI's own
+  // SSE (which streams fine on iOS, e.g. ChatGPT web + our own-key path) omits
+  // them. Let the runtime frame the stream.
+
+  // iOS Safari/WebKit (and Chrome on iOS, which is WebKit under the hood)
+  // buffers a streamed fetch response until ~1KB has arrived before surfacing
+  // ANY chunk to the client's reader. Gemini's first SSE chunks are tiny, so
+  // iOS clients received nothing and tripped the app's 60s idle-timeout while
+  // desktop worked fine. Prime the stream with a >1KB SSE comment line (begins
+  // with ':', ignored by every SSE parser incl. the AI SDK's) and flush, so
+  // delivery starts immediately. Harmless on desktop.
+  res.write(`:${" ".repeat(2048)}\n\n`);
+  {
+    const r = res as Response & {flush?: () => void};
+    if (typeof r.flush === "function") r.flush();
+  }
 
   try {
     const upstream = await axios.post(

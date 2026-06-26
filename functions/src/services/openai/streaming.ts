@@ -20,8 +20,23 @@ export const handleOpenAIStreaming = async (
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Transfer-Encoding", "chunked");
+  res.setHeader("X-Accel-Buffering", "no");
+  // No `Connection` / `Transfer-Encoding` — both forbidden over HTTP/2; iOS
+  // WebKit rejects the response ("Load failed") when present.
+  // See gemini/passthrough.ts for the full rationale.
+
+  // iOS Safari/WebKit buffers a streamed fetch response until ~1KB has arrived
+  // before surfacing ANY chunk to the client, so iOS clients saw nothing and
+  // tripped the app's 60s idle-timeout while desktop worked. Prime with a >1KB
+  // SSE comment line (':' prefix, ignored by SSE parsers) + flush so delivery
+  // starts immediately. Harmless on desktop.
+  res.write(`:${" ".repeat(2048)}\n\n`);
+  {
+    const resWithFlush = res as Response & {flush?: () => void};
+    if (typeof resWithFlush.flush === "function") {
+      resWithFlush.flush();
+    }
+  }
 
   try {
     const response = await axios.post(

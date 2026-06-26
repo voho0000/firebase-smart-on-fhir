@@ -31,6 +31,12 @@ export const corsHandler = cors({
   // anthropic-version / anthropic-beta are added by the @ai-sdk/anthropic
   // client on every request; omitting them made every Claude proxy call fail
   // CORS preflight ("Failed to fetch").
+  // User-Agent: the AI SDK sets a custom UA (e.g. "ai-sdk/..."). Desktop
+  // Chrome/Firefox treat User-Agent as a forbidden header and strip it, so it
+  // never reaches the preflight — but iOS Safari/WebKit (incl. Chrome on iOS)
+  // ALLOWS fetch to set it, so its preflight asks for `User-Agent` and the
+  // proxy MUST allow it or every iOS proxy call fails with "Load failed".
+  // (This was THE iOS-only "連線被擋下" bug.)
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -38,5 +44,6 @@ export const corsHandler = cors({
     "x-client-key",
     "anthropic-version",
     "anthropic-beta",
+    "User-Agent",
   ],
 });

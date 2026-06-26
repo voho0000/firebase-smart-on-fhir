@@ -96,8 +96,18 @@ export const handleOpenAiPassthrough = async (
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Transfer-Encoding", "chunked");
+  res.setHeader("X-Accel-Buffering", "no");
+  // No `Connection: keep-alive` / `Transfer-Encoding: chunked` — forbidden over
+  // HTTP/2 (browser↔Cloud Run); iOS WebKit rejects the response ("Load failed")
+  // when present. See gemini/passthrough.ts for the full rationale.
+
+  // Prime the stream past iOS WebKit's ~1KB delivery buffer (SSE comment line,
+  // ignored by parsers) so iOS surfaces chunks immediately instead of stalling.
+  res.write(`:${" ".repeat(2048)}\n\n`);
+  {
+    const r = res as Response & {flush?: () => void};
+    if (typeof r.flush === "function") r.flush();
+  }
 
   try {
     const upstream = await axios.post(url, chatRequest, {

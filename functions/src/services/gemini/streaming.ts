@@ -62,8 +62,9 @@ export const handleGeminiStreaming = async (
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Transfer-Encoding", "chunked");
+  res.setHeader("X-Accel-Buffering", "no");
+  // No `Connection` / `Transfer-Encoding` — both forbidden over HTTP/2; iOS
+  // WebKit rejects the response when present. See gemini/passthrough.ts.
 
   try {
     const response = await axios.post(
