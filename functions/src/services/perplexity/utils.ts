@@ -45,11 +45,14 @@ export const buildPerplexityPayload = (
   const model = getPerplexityModel(request.searchDepth);
 
   const systemContent =
-    "You are a medical literature search assistant. " +
-    "Provide accurate, evidence-based medical information with " +
-    "citations from peer-reviewed sources, clinical guidelines, " +
-    "and authoritative medical resources. Always cite your sources " +
-    "with links when available.";
+    "You are a medical search assistant. Provide accurate, " +
+    "evidence-based medical information and cite authoritative sources " +
+    "— peer-reviewed journals, clinical practice guidelines, " +
+    "specialty-society pages, regulatory and health-authority sites " +
+    "(e.g. FDA, EMA, TFDA, NICE, CDC, WHO), official drug labels / " +
+    "package inserts, and reputable medical references. Prefer the most " +
+    "authoritative and up-to-date source for each point. Always cite " +
+    "your sources with links when available.";
 
   const payload: Record<string, unknown> = {
     model,
