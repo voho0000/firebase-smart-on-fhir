@@ -1,0 +1,17 @@
+{
+  "name": "firebase-smart-on-fhir",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Firestore rules + AI proxy Cloud Functions for MediPrisma. This root package holds the Firestore security-rules test suite; the Cloud Functions live in functions/ with their own package.json.",
+  "scripts": {
+    "test:rules": "firebase emulators:exec --only firestore \"node --test tests/*.test.mjs\"",
+    "test:functions": "QUOTA_DAILY_LIMIT=3 QUOTA_ANON_LIMIT=2 QUOTA_DAILY_LIMIT_PERPLEXITY=2 QUOTA_DAILY_LIMIT_WHISPER=2 firebase emulators:exec --only firestore --project demo-mediprisma \"node functions/node_modules/jest/bin/jest.js -c jest.functions.config.cjs\"",
+    "test:e2e:app": "firebase emulators:exec --only auth,firestore --project demo-mediprisma \"npm --prefix '../medical-note-smart-on-fhir' run test:e2e:emulated\"",
+    "test": "npm run test:rules && npm run test:functions"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.6.0",
+    "firebase-tools": "^13.35.1"
+  }
+}
