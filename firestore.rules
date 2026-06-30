@@ -11,8 +11,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
       
+      // 每日額度計數由代理 Cloud Functions 以 Admin SDK 寫入（Admin SDK 會略過
+      // 規則）。client 只讀取以顯示剩餘額度，不可寫入，讓計量維持伺服器端為準。
       match /usage/{date} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
       }
       
       match /chatTemplates/{templateId} {
