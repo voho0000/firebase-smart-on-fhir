@@ -3,6 +3,7 @@ import axios from "axios";
 import * as logger from "firebase-functions/logger";
 import {getOpenAiApiKey, getOpenAiBaseUrl} from "../../config/runtime";
 import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
+import {verifyAppCheck} from "../../middleware/appCheck";
 import {checkAndConsumeQuota} from "../../middleware/quota";
 import {
   parseJsonBody,
@@ -24,6 +25,10 @@ export const handleChatCompletion = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  if (!(await verifyAppCheck(req, res))) {
     return;
   }
 

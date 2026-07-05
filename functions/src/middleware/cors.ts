@@ -45,5 +45,8 @@ export const corsHandler = cors({
     "anthropic-version",
     "anthropic-beta",
     "User-Agent",
+    // App Check attestation token (anti-abuse) sent by the proxy-fetch
+    // interceptor; without it here the browser preflight blocks the call.
+    "X-Firebase-AppCheck",
   ],
 });

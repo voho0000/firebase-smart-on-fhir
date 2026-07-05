@@ -3,6 +3,7 @@ import axios, {isAxiosError} from "axios";
 import * as logger from "firebase-functions/logger";
 import {getPerplexityApiKey} from "../../config/runtime";
 import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
+import {verifyAppCheck} from "../../middleware/appCheck";
 import {checkAndConsumeQuota} from "../../middleware/quota";
 import {parseJsonBody} from "../../utils/parser";
 import {buildPerplexityPayload, isAuthoritativeUrl} from "./utils";
@@ -25,6 +26,10 @@ export const handlePerplexitySearch = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  if (!(await verifyAppCheck(req, res))) {
     return;
   }
 

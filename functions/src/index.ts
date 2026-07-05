@@ -1,3 +1,5 @@
+// deploy-stamp: 2026-07-05 App Check CORS rollout (forces a fresh source hash
+// after a partial deploy left stale code serving with a current hash label)
 import {setGlobalOptions} from "firebase-functions/v2";
 import {onRequest} from "firebase-functions/v2/https";
 import {withCorsAndErrorHandling} from "./middleware/errorHandler";

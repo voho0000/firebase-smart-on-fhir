@@ -1,6 +1,7 @@
 import type {Request, Response} from "express";
 import * as logger from "firebase-functions/logger";
 import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
+import {verifyAppCheck} from "../../middleware/appCheck";
 import {checkAndConsumeQuota} from "../../middleware/quota";
 import {parseJsonBody} from "../../utils/parser";
 
@@ -27,6 +28,10 @@ export const handleClaudeChat = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  if (!(await verifyAppCheck(req, res))) {
     return;
   }
 

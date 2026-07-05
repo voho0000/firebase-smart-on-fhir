@@ -5,6 +5,7 @@ import FormData from "form-data";
 import {PassThrough} from "stream";
 import {getOpenAiApiKey, getOpenAiBaseUrl} from "../../config/runtime";
 import {verifyClientKey, verifyFirebaseIdToken} from "../../middleware/auth";
+import {verifyAppCheck} from "../../middleware/appCheck";
 import {checkAndConsumeQuota} from "../../middleware/quota";
 import type {RequestWithRawBody, UploadedFileInfo} from "../../types/common";
 
@@ -133,6 +134,10 @@ export const handleWhisper = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  if (!(await verifyAppCheck(req, res))) {
     return;
   }
 

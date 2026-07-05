@@ -5,6 +5,7 @@ import {getFirestore, FieldValue} from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import {Resend} from "resend";
 import {verifyClientKey} from "../../middleware/auth";
+import {verifyAppCheck} from "../../middleware/appCheck";
 import {parseJsonBody} from "../../utils/parser";
 import type {FeedbackRequest} from "./types";
 import {
@@ -95,6 +96,10 @@ export const handleFeedback = async (
   }
 
   if (!verifyClientKey(req, res)) {
+    return;
+  }
+
+  if (!(await verifyAppCheck(req, res))) {
     return;
   }
 
