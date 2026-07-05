@@ -6,9 +6,11 @@ Firebase Cloud Functions 專案，提供 AI 服務的 proxy endpoints，整合 O
 
 - **OpenAI Chat Completion Proxy** - 支援 GPT 模型的對話完成功能
 - **Google Gemini Chat Proxy** - 整合 Google Gemini AI 對話服務
+- **Anthropic Claude Chat Proxy** - Claude Messages API passthrough（含 SSE streaming）
 - **Whisper 語音轉文字** - OpenAI Whisper API 的語音辨識服務
 - **Perplexity 醫療文獻搜尋** - 專為醫療文獻搜尋優化的 AI 搜尋服務
 - **使用者回饋系統** - 收集並處理使用者回饋
+- **Dev / Prod 雙組 Functions** - 同一份程式碼匯出兩組 endpoints；`dev-*` 組供 localhost 開發驗證，正式組 URL 永遠不受開發影響
 
 ## 技術架構
 
@@ -35,10 +37,11 @@ firebase-smart-on-fhir/
 ├── functions/
 │   ├── src/
 │   │   ├── config/          # 配置檔案
-│   │   ├── middleware/      # 中介軟體 (CORS, 錯誤處理)
+│   │   ├── middleware/      # 中介軟體 (CORS, App Check, 認證, 配額, 錯誤處理)
 │   │   ├── services/        # 各種 AI 服務處理器
 │   │   │   ├── openai/      # OpenAI 服務
 │   │   │   ├── gemini/      # Gemini 服務
+│   │   │   ├── claude/      # Claude 服務
 │   │   │   ├── whisper/     # Whisper 語音服務
 │   │   │   ├── perplexity/  # Perplexity 搜尋服務
 │   │   │   └── feedback/    # 回饋處理服務
@@ -85,8 +88,11 @@ npm install
 firebase functions:secrets:set OPENAI_API_KEY
 firebase functions:secrets:set GEMINI_API_KEY
 firebase functions:secrets:set PERPLEXITY_API_KEY
+firebase functions:secrets:set ANTHROPIC_API_KEY
 firebase functions:secrets:set RESEND_API_KEY
 ```
+
+Secrets 綁在 `setGlobalOptions`，dev 組與正式組共用同一組，無需重複設定。
 
 ## 開發指令
 
@@ -112,35 +118,48 @@ npm run shell
 
 ## 部署
 
-### 部署所有 Functions
+### Dev / Prod 雙組架構（2026-07-05 起）
+
+`index.ts` 把同一批 handler 匯出兩次：六個正式 functions（URL 不變）＋一個 `dev` group（部署為 `dev-proxyGeminiChat` 等，各有獨立 URL）。兩組差異只在建構時參數：
+
+| | 正式組 | dev 組 |
+|---|---|---|
+| CORS 白名單 | `ALLOWED_ORIGINS` env（未設＝全放行） | 寫死 `localhost:3001` / `127.0.0.1:3001` |
+| App Check | `APPCHECK_ENFORCE` env（目前 log-only） | 同左；要預演 enforce 時把 `DEV_HANDLER_OPTIONS.appCheckEnforce` 改 `true` |
+| maxInstances | 10（全域） | 2（限制失控迴圈的燒錢上限） |
+
+**合約變更（新 header、App Check enforce 等）一律 dev-first**：`deploy:dev` → 本機（app repo 的 `.env.local` 指向 `dev-*` URL）驗證 → `deploy:prod`。正式環境全程不動。
+
+注意：env（`.env` / `ALLOWED_ORIGINS` / `APPCHECK_ENFORCE`）是整個 codebase 部署時共用的，**兩組不可能靠 env 區分**——per-group 設定必須走 `withCorsAndErrorHandling(handler, {origins, appCheckEnforce})` 的建構參數。
+
+### 部署指令
 
 ```bash
+# 只部署 dev 組（完全不碰正式六個）
+npm run deploy:dev
+
+# 只部署正式六個（明確列名，永遠碰不到 dev 組）
+npm run deploy:prod
+
+# 全部（含 dev 組）
 npm run deploy
-```
-
-或使用 Firebase CLI:
-
-```bash
-firebase deploy --only functions
 ```
 
 ### 部署特定 Function
 
 ```bash
-firebase deploy --only functions:proxyWhisper
-firebase deploy --only functions:proxyGeminiChat
-firebase deploy --only functions:proxyChatCompletion
-firebase deploy --only functions:proxyPerplexitySearch
-firebase deploy --only functions:sendFeedback
+firebase deploy --only functions:proxyGeminiChat        # 單一正式 function
+firebase deploy --only functions:dev                    # 整個 dev 組
 ```
 
 ## API Endpoints
 
-部署後，以下 endpoints 將可用:
+部署後，以下 endpoints 將可用（dev 組為同名加 `dev-` 前綴，各有獨立 URL）:
 
 - `POST /proxyWhisper` - Whisper 語音轉文字
 - `POST /proxyGeminiChat` - Gemini 對話
 - `POST /proxyChatCompletion` - OpenAI Chat Completion
+- `POST /proxyClaudeChat` - Claude 對話（Messages API passthrough）
 - `POST /proxyPerplexitySearch` - Perplexity 醫療搜尋
 - `POST /sendFeedback` - 提交使用者回饋
 
@@ -163,7 +182,9 @@ firebase deploy --only functions:sendFeedback
 
 ## 安全性
 
-- 所有 endpoints 都包含 CORS 保護
+- 所有 endpoints 都包含 CORS 保護（dev 組鎖 localhost；正式組讀 `ALLOWED_ORIGINS`）
+- 所有 proxy 要求 Firebase ID token（匿名或登入），並以 Firestore transaction 做 per-uid 每日配額
+- App Check（`X-Firebase-AppCheck`）驗證目前為 log-only；enforce 可由 env 全域開啟，或以建構參數在 dev 組先行預演
 - 使用 Firebase Secret Manager 管理 API keys
 - Firestore 規則確保使用者只能存取自己的資料
 - 共享提示詞支援公開讀取，但只有作者可以修改/刪除
@@ -180,7 +201,7 @@ npm run logs
 
 ## 效能配置
 
-- **最大實例數**: 10
+- **最大實例數**: 10（正式組）/ 2（dev 組）
 - **超時時間**: 300 秒（AI endpoints）/ 60 秒（feedback）
 - **記憶體配置**: 1GiB（AI endpoints）/ 512MiB（feedback）
 
