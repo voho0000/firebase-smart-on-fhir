@@ -8,6 +8,8 @@
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
+    "deploy:dev": "firebase deploy --only functions:dev",
+    "deploy:prod": "firebase deploy --only functions:proxyWhisper,functions:proxyGeminiChat,functions:proxyChatCompletion,functions:proxyPerplexitySearch,functions:proxyClaudeChat,functions:sendFeedback",
     "logs": "firebase functions:log"
   },
   "engines": {

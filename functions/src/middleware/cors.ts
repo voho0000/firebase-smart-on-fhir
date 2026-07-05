@@ -6,12 +6,15 @@ import {parseList} from "../utils/parser";
 const getAllowedOrigins = (): string[] =>
   parseList(getRuntimeConfig().proxy?.origins ?? process.env.ALLOWED_ORIGINS);
 
-export const corsHandler = cors({
+// All functions in this codebase share one .env at deploy time, so a
+// per-group whitelist (e.g. the dev-* group allowing only localhost) cannot
+// come from ALLOWED_ORIGINS — it must be passed in at construction.
+export const makeCorsHandler = (originsOverride?: string[]) => cors({
   origin: (
     origin: string | undefined,
     callback: (err: Error | null, allow?: boolean) => void,
   ) => {
-    const allowedOrigins = getAllowedOrigins();
+    const allowedOrigins = originsOverride ?? getAllowedOrigins();
     if (!origin) {
       callback(null, true);
       return;
@@ -50,3 +53,6 @@ export const corsHandler = cors({
     "X-Firebase-AppCheck",
   ],
 });
+
+// Default instance: whitelist from ALLOWED_ORIGINS (empty = allow all).
+export const corsHandler = makeCorsHandler();

@@ -50,3 +50,56 @@ export const sendFeedback = onRequest(
   {timeoutSeconds: 60, memory: "512MiB"},
   withCorsAndErrorHandling(handleFeedback),
 );
+
+// ---------------------------------------------------------------------------
+// Dev group — deployed as separate `dev-*` functions with their own URLs, so
+// localhost can exercise contract changes (new headers, App Check enforce)
+// against real Cloud Run infra while production stays untouched.
+// Deploy with `npm run deploy:dev`; `npm run deploy:prod` never touches these.
+// Same handlers, same secrets; only construction-time options differ.
+// ---------------------------------------------------------------------------
+
+const DEV_HANDLER_OPTIONS = {
+  // localhost only — the deployed app must never point at dev-* URLs.
+  // Port 3001 = the app's `next dev -p 3001`.
+  origins: ["http://localhost:3001", "http://127.0.0.1:3001"],
+  // App Check stays log-only here for now: the app has no debug-token flow
+  // on localhost yet, so enforcing would 401 every local call. Flip to true
+  // to rehearse enforcement in dev before production.
+  appCheckEnforce: undefined,
+};
+
+// maxInstances 2 (vs the global 10): caps the blast radius of a runaway
+// loop during local development.
+const DEV_PROXY_RUNTIME = {
+  timeoutSeconds: 300,
+  memory: "1GiB" as const,
+  maxInstances: 2,
+};
+
+export const dev = {
+  proxyWhisper: onRequest(
+    DEV_PROXY_RUNTIME,
+    withCorsAndErrorHandling(handleWhisper, DEV_HANDLER_OPTIONS),
+  ),
+  proxyGeminiChat: onRequest(
+    DEV_PROXY_RUNTIME,
+    withCorsAndErrorHandling(handleGeminiChat, DEV_HANDLER_OPTIONS),
+  ),
+  proxyChatCompletion: onRequest(
+    DEV_PROXY_RUNTIME,
+    withCorsAndErrorHandling(handleChatCompletion, DEV_HANDLER_OPTIONS),
+  ),
+  proxyPerplexitySearch: onRequest(
+    DEV_PROXY_RUNTIME,
+    withCorsAndErrorHandling(handlePerplexitySearch, DEV_HANDLER_OPTIONS),
+  ),
+  proxyClaudeChat: onRequest(
+    DEV_PROXY_RUNTIME,
+    withCorsAndErrorHandling(handleClaudeChat, DEV_HANDLER_OPTIONS),
+  ),
+  sendFeedback: onRequest(
+    {timeoutSeconds: 60, memory: "512MiB", maxInstances: 2},
+    withCorsAndErrorHandling(handleFeedback, DEV_HANDLER_OPTIONS),
+  ),
+};

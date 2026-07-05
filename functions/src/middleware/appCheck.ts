@@ -12,7 +12,14 @@ const ensureAdminApp = () => {
 // Enforcement is OFF by default so this can ship before the app is sending
 // tokens. Flip APPCHECK_ENFORCE=true (env/secret) once real traffic is observed
 // to carry valid tokens (see the log-only warnings below).
-const isEnforced = (): boolean => {
+// A per-function override (res.locals.appCheckEnforce, set by
+// withCorsAndErrorHandling options) wins over the env flag, so the dev-*
+// group can enforce before production does — env is shared codebase-wide.
+const isEnforced = (res: Response): boolean => {
+  const override = res.locals?.appCheckEnforce;
+  if (typeof override === "boolean") {
+    return override;
+  }
   const v = (process.env.APPCHECK_ENFORCE ?? "").toLowerCase();
   return v === "true" || v === "1";
 };
@@ -35,7 +42,7 @@ export const verifyAppCheck = async (
   req: Request,
   res: Response,
 ): Promise<boolean> => {
-  const enforce = isEnforced();
+  const enforce = isEnforced(res);
   const token = req.header("X-Firebase-AppCheck");
 
   if (!token) {

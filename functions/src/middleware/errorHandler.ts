@@ -1,9 +1,19 @@
 import type {Request, Response} from "express";
 import {isAxiosError, type AxiosError} from "axios";
 import * as logger from "firebase-functions/logger";
-import {corsHandler} from "./cors";
+import {corsHandler, makeCorsHandler} from "./cors";
 
 type Handler = (req: Request, res: Response) => Promise<void> | void;
+
+export interface HandlerOptions {
+  /** Explicit CORS origin whitelist; overrides ALLOWED_ORIGINS env. */
+  origins?: string[];
+  /**
+   * Per-function App Check override; overrides APPCHECK_ENFORCE env.
+   * Lets the dev-* group enforce before production flips (or vice versa).
+   */
+  appCheckEnforce?: boolean;
+}
 
 const extractOpenAiMessage = (details: unknown): string | undefined => {
   if (
@@ -54,25 +64,38 @@ export const handleError = (error: unknown, res: Response): void => {
   res.status(500).json({error: "Internal server error"});
 };
 
-export const withCorsAndErrorHandling =
-  (handler: Handler) =>
-    (req: Request, res: Response): void => {
-      corsHandler(req, res, async (corsError: Error | null) => {
-        if (corsError) {
-          logger.warn("CORS request rejected", {message: corsError.message});
-          res.status(403).json({error: corsError.message});
-          return;
-        }
+export const withCorsAndErrorHandling = (
+  handler: Handler,
+  options?: HandlerOptions,
+) => {
+  const corsForHandler = options?.origins ?
+    makeCorsHandler(options.origins) :
+    corsHandler;
 
-        if (req.method === "OPTIONS") {
-          res.status(204).send("");
-          return;
-        }
+  return (req: Request, res: Response): void => {
+    // Downstream middleware (verifyAppCheck) reads this per-request override;
+    // env vars can't differ per function group within one codebase.
+    if (options?.appCheckEnforce !== undefined) {
+      res.locals.appCheckEnforce = options.appCheckEnforce;
+    }
 
-        try {
-          await handler(req, res);
-        } catch (error) {
-          handleError(error, res);
-        }
-      });
-    };
+    corsForHandler(req, res, async (corsError: Error | null) => {
+      if (corsError) {
+        logger.warn("CORS request rejected", {message: corsError.message});
+        res.status(403).json({error: corsError.message});
+        return;
+      }
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      try {
+        await handler(req, res);
+      } catch (error) {
+        handleError(error, res);
+      }
+    });
+  };
+};
