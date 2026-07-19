@@ -7,6 +7,7 @@ Firebase Cloud Functions 專案，提供 AI 服務的 proxy endpoints，整合 O
 - **OpenAI Chat Completion Proxy** - 支援 GPT 模型的對話完成功能
 - **Google Gemini Chat Proxy** - 整合 Google Gemini AI 對話服務
 - **Anthropic Claude Chat Proxy** - Claude Messages API passthrough（含 SSE streaming）
+- **BYO OpenAI-compatible Gateway** - 讓使用者以自己的 API key 連接經白名單核准、但不支援瀏覽器 CORS 的 HTTPS provider
 - **Whisper 語音轉文字** - OpenAI Whisper API 的語音辨識服務
 - **Perplexity 醫療文獻搜尋** - 專為醫療文獻搜尋優化的 AI 搜尋服務
 - **使用者回饋系統** - 收集並處理使用者回饋
@@ -93,6 +94,15 @@ firebase functions:secrets:set RESEND_API_KEY
 ```
 
 Secrets 綁在 `setGlobalOptions`，dev 組與正式組共用同一組，無需重複設定。
+`proxyOpenAiCompatibleGateway` 會以 `secrets: []` 覆寫全域設定，不會取得上述 owner-funded keys。
+
+BYO Gateway 預設允許 NVIDIA API Catalog 與 J3Soon AI。若要改用其他可信 provider，設定逗號分隔的精確 API Base URL（設定後會取代預設清單）：
+
+```bash
+OPENAI_COMPATIBLE_GATEWAY_BASE_URLS=https://integrate.api.nvidia.com/v1,https://ai.j3soon.com/v1,https://approved-provider.example/v1
+```
+
+只接受公開 HTTPS hostname、443 port、`models` 與 `chat/completions`；不接受任意 URL、IP、redirect、query 或 fragment。
 
 ## 開發指令
 
@@ -120,7 +130,7 @@ npm run shell
 
 ### Dev / Prod 雙組架構（2026-07-05 起）
 
-`index.ts` 把同一批 handler 匯出兩次：六個正式 functions（URL 不變）＋一個 `dev` group（部署為 `dev-proxyGeminiChat` 等，各有獨立 URL）。兩組差異只在建構時參數：
+`index.ts` 把同一批 handler 匯出兩次：六個正式 proxy functions 加上 feedback（一共七個，既有 URL 不變）＋一個 `dev` group（部署為 `dev-proxyGeminiChat` 等，各有獨立 URL）。兩組差異只在建構時參數：
 
 | | 正式組 | dev 組 |
 |---|---|---|
@@ -161,7 +171,25 @@ firebase deploy --only functions:dev                    # 整個 dev 組
 - `POST /proxyChatCompletion` - OpenAI Chat Completion
 - `POST /proxyClaudeChat` - Claude 對話（Messages API passthrough）
 - `POST /proxyPerplexitySearch` - Perplexity 醫療搜尋
+- `GET|POST /proxyOpenAiCompatibleGateway` - 使用者自備 key 的受限 OpenAI-compatible Gateway
 - `POST /sendFeedback` - 提交使用者回饋
+
+### BYO OpenAI-compatible Gateway contract
+
+Gateway 保留 `Authorization` 給 Firebase ID token，使用者的 provider key 使用獨立 header，且不儲存：
+
+```text
+Authorization: Bearer <Firebase ID token>
+X-Firebase-AppCheck: <App Check token>
+X-Upstream-Base-URL: https://integrate.api.nvidia.com/v1
+X-Upstream-Path: models | chat/completions
+X-Upstream-API-Key: <user-owned provider key>
+```
+
+- `models` 必須用 `GET`；`chat/completions` 必須用 `POST`。
+- Chat JSON 與 SSE response 原樣轉送，包含 provider-specific reasoning fields。
+- Production Gateway 強制 App Check、Firebase Auth、per-uid quota 與精確 CORS origin。
+- Prompt、response 與 provider key 會在當次請求中經過 Firebase／Google Cloud；不得把此模式描述為 browser-direct。
 
 詳細的 API 使用說明請參考:
 - [Perplexity API 使用說明](./PERPLEXITY_API_USAGE.md)
@@ -184,7 +212,8 @@ firebase deploy --only functions:dev                    # 整個 dev 組
 
 - 所有 endpoints 都包含 CORS 保護（dev 組鎖 localhost；正式組讀 `ALLOWED_ORIGINS`）
 - 所有 proxy 要求 Firebase ID token（匿名或登入），並以 Firestore transaction 做 per-uid 每日配額
-- App Check（`X-Firebase-AppCheck`）驗證目前為 log-only；enforce 可由 env 全域開啟，或以建構參數在 dev 組先行預演
+- BYO Gateway 另有 `gatewayCount` quota，且 upstream URL 使用精確白名單以避免 SSRF／通用轉送器
+- 一般 proxy 的 App Check（`X-Firebase-AppCheck`）預設為 log-only；正式 BYO Gateway 則個別強制驗證
 - 使用 Firebase Secret Manager 管理 API keys
 - Firestore 規則確保使用者只能存取自己的資料
 - 共享提示詞支援公開讀取，但只有作者可以修改/刪除

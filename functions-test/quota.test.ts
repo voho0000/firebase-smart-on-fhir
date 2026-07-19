@@ -7,6 +7,9 @@
 //   QUOTA_DAILY_LIMIT_PERPLEXITY=2  QUOTA_DAILY_LIMIT_WHISPER=2
 import {checkAndConsumeQuota} from "../functions/src/middleware/quota";
 
+// The first Firestore transaction can include emulator cold-start time.
+jest.setTimeout(15000);
+
 function mockRes() {
   const res = {
     statusCode: 0,
@@ -57,6 +60,7 @@ describe("checkAndConsumeQuota (Firestore emulator)", () => {
     // Different fields — still available despite chat being exhausted.
     expect(await checkAndConsumeQuota(u, res as never, "perplexity", false)).toBe(true);
     expect(await checkAndConsumeQuota(u, res as never, "whisper", false)).toBe(true);
+    expect(await checkAndConsumeQuota(u, res as never, "gateway", false)).toBe(true);
   });
 
   it("meters each uid independently", async () => {

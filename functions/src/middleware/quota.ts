@@ -10,7 +10,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 
-export type QuotaService = "chat" | "perplexity" | "whisper";
+export type QuotaService = "chat" | "perplexity" | "whisper" | "gateway";
 
 // Per-service daily limits, env-tunable without a code change.
 // chat (GPT/Gemini) stays in sync with the app's QUOTA_CONFIG.DAILY_LIMIT;
@@ -19,6 +19,7 @@ const LIMITS: Record<QuotaService, number> = {
   chat: Number(process.env.QUOTA_DAILY_LIMIT ?? "200"),
   perplexity: Number(process.env.QUOTA_DAILY_LIMIT_PERPLEXITY ?? "50"),
   whisper: Number(process.env.QUOTA_DAILY_LIMIT_WHISPER ?? "50"),
+  gateway: Number(process.env.QUOTA_DAILY_LIMIT_GATEWAY ?? "500"),
 };
 
 // Anonymous (not-signed-in) visitors get a smaller free allowance than
@@ -29,6 +30,7 @@ const ANON_LIMITS: Record<QuotaService, number> = {
   chat: Number(process.env.QUOTA_ANON_LIMIT ?? "50"),
   perplexity: Number(process.env.QUOTA_ANON_LIMIT_PERPLEXITY ?? "10"),
   whisper: Number(process.env.QUOTA_ANON_LIMIT_WHISPER ?? "10"),
+  gateway: Number(process.env.QUOTA_ANON_LIMIT_GATEWAY ?? "100"),
 };
 
 // Field names inside the daily usage doc. "count" is chat — the app's quota
@@ -37,6 +39,7 @@ const FIELDS: Record<QuotaService, string> = {
   chat: "count",
   perplexity: "perplexityCount",
   whisper: "whisperCount",
+  gateway: "gatewayCount",
 };
 
 const DATABASE_ID = "mediprisma";

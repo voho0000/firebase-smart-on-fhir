@@ -17,6 +17,9 @@ module.exports = {
     '^.+\\.ts$': [
       require.resolve('ts-jest', { paths: [fnNodeModules] }),
       {
+        // Firebase CLI may hoist its own TypeScript runtime at the repo root.
+        // Always use the Functions compiler that ts-jest was installed with.
+        compiler: require.resolve('typescript', { paths: [fnNodeModules] }),
         tsconfig: path.join(__dirname, 'functions', 'tsconfig.json'),
         // Transpile-only: production `tsc` already type-checks.
         diagnostics: false,

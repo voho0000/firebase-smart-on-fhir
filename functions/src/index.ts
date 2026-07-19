@@ -9,6 +9,9 @@ import {handleWhisper} from "./services/whisper/handler";
 import {handlePerplexitySearch} from "./services/perplexity/handler";
 import {handleFeedback} from "./services/feedback/handler";
 import {handleClaudeChat} from "./services/claude/handler";
+import {handleOpenAiCompatibleGateway} from
+  "./services/openai-compatible-gateway/handler";
+import {parseList} from "./utils/parser";
 
 setGlobalOptions({
   maxInstances: 10,
@@ -49,6 +52,26 @@ export const proxyClaudeChat = onRequest(
 export const sendFeedback = onRequest(
   {timeoutSeconds: 60, memory: "512MiB"},
   withCorsAndErrorHandling(handleFeedback),
+);
+
+const gatewayOrigins = parseList(process.env.ALLOWED_ORIGINS);
+const PROD_GATEWAY_ORIGINS = gatewayOrigins.length > 0 ? gatewayOrigins : [
+  "https://mediprisma.tw",
+  "https://voho0000.github.io",
+];
+
+export const proxyOpenAiCompatibleGateway = onRequest(
+  {
+    timeoutSeconds: 540,
+    memory: "1GiB",
+    // This BYO-key gateway must not inherit the owner-funded provider secrets
+    // bound globally above. It forwards only the caller's ephemeral key.
+    secrets: [],
+  },
+  withCorsAndErrorHandling(handleOpenAiCompatibleGateway, {
+    origins: PROD_GATEWAY_ORIGINS,
+    appCheckEnforce: true,
+  }),
 );
 
 // ---------------------------------------------------------------------------
@@ -101,5 +124,12 @@ export const dev = {
   sendFeedback: onRequest(
     {timeoutSeconds: 60, memory: "512MiB", maxInstances: 2},
     withCorsAndErrorHandling(handleFeedback, DEV_HANDLER_OPTIONS),
+  ),
+  proxyOpenAiCompatibleGateway: onRequest(
+    {...DEV_PROXY_RUNTIME, timeoutSeconds: 540, secrets: []},
+    withCorsAndErrorHandling(
+      handleOpenAiCompatibleGateway,
+      DEV_HANDLER_OPTIONS,
+    ),
   ),
 };

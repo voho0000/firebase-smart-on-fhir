@@ -28,7 +28,7 @@ export const makeCorsHandler = (originsOverride?: string[]) => cors({
     logger.warn("Blocked CORS origin", {origin});
     callback(new Error("Not allowed by CORS"));
   },
-  methods: ["POST", "OPTIONS"],
+  methods: ["GET", "POST", "OPTIONS"],
   // Authorization carries the Firebase ID token (audit A6) — without it here
   // the browser preflight rejects every authenticated proxy call.
   // anthropic-version / anthropic-beta are added by the @ai-sdk/anthropic
@@ -51,6 +51,11 @@ export const makeCorsHandler = (originsOverride?: string[]) => cors({
     // App Check attestation token (anti-abuse) sent by the proxy-fetch
     // interceptor; without it here the browser preflight blocks the call.
     "X-Firebase-AppCheck",
+    // BYO OpenAI-compatible gateway routing. Authorization remains reserved
+    // for the Firebase ID token; the upstream key must use a separate header.
+    "X-Upstream-API-Key",
+    "X-Upstream-Base-URL",
+    "X-Upstream-Path",
   ],
 });
 

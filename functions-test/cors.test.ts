@@ -89,4 +89,25 @@ describe("corsHandler", () => {
     // preflight is short-circuited by the cors middleware
     expect(res.end).toHaveBeenCalled();
   });
+
+  it("allows the BYO gateway GET and upstream routing headers", () => {
+    delete process.env.ALLOWED_ORIGINS;
+    const req = mockReq("OPTIONS", {
+      origin: "https://mediprisma.tw",
+      "access-control-request-method": "GET",
+      "access-control-request-headers":
+        "authorization,x-upstream-base-url,x-upstream-path," +
+        "x-upstream-api-key",
+    });
+    const res = mockRes();
+    corsHandler(req, res as never, jest.fn());
+    const methods =
+      (res._headers["access-control-allow-methods"] || "").toUpperCase();
+    const headers =
+      (res._headers["access-control-allow-headers"] || "").toLowerCase();
+    expect(methods).toContain("GET");
+    expect(headers).toContain("x-upstream-base-url");
+    expect(headers).toContain("x-upstream-path");
+    expect(headers).toContain("x-upstream-api-key");
+  });
 });
