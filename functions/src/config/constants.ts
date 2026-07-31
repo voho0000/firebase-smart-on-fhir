@@ -1,5 +1,8 @@
-// Proxy tier only — stronger models require the user's own key in the app
+// Owner-funded OpenAI proxy allowlists are split by upstream API surface.
 export const ALLOWED_MODEL_IDS = new Set<string>(["gpt-5.4-nano"]);
+export const ALLOWED_OPENAI_RESPONSES_MODEL_IDS = new Set<string>([
+  "gpt-5.6-luna",
+]);
 
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";

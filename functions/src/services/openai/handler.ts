@@ -12,6 +12,10 @@ import {
 } from "../../utils/parser";
 import {sanitizeChatPayload, transformMessagesForOpenAI} from "./utils";
 import {isNativeOpenAiBody, handleOpenAiPassthrough} from "./passthrough";
+import {
+  handleOpenAiResponses,
+  isOpenAiResponsesBody,
+} from "./responses";
 import {handleOpenAIStreaming} from "./streaming";
 
 export const handleChatCompletion = async (
@@ -51,6 +55,13 @@ export const handleChatCompletion = async (
   }
 
   const payload = parseJsonBody(req);
+
+  // GPT-5.6 Luna uses OpenAI's Responses API. Keep this branch ahead of the
+  // Chat Completions parsers: Responses payloads carry `input`, not `messages`.
+  if (isOpenAiResponsesBody(payload)) {
+    await handleOpenAiResponses(payload, res);
+    return;
+  }
 
   // Native AI-SDK body (tool_calls / role:"tool" / multimodal content) →
   // forward verbatim so multi-step tool loops survive (the legacy normalize
