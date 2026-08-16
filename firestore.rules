@@ -8,9 +8,52 @@ service cloud.firestore {
              && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
+    function isFeatureRequestAdmin() {
+      return isRealUser()
+             && request.auth.token.keys().hasAll(['email', 'email_verified'])
+             && request.auth.token.email_verified == true
+             && request.auth.token.email == 'voho0000@gmail.com';
+    }
+
+    function ownsFeatureRequest(requestId) {
+      return isRealUser()
+             && exists(/databases/$(database)/documents/featureRequestOwners/$(requestId))
+             && get(/databases/$(database)/documents/featureRequestOwners/$(requestId)).data.authorId == request.auth.uid;
+    }
+
+    function validFeatureRequestStatus(status) {
+      return status in ['evaluating', 'planned', 'in-progress', 'completed'];
+    }
+
+    function validFeatureRequestCategory(category) {
+      return category in ['ai', 'feature', 'ui'];
+    }
+
+    function validFeatureRequestContent(data) {
+      return data.title is string
+             && data.title.size() >= 2
+             && data.title.size() <= 100
+             && data.description is string
+             && data.description.size() <= 1200
+             && validFeatureRequestCategory(data.category)
+             && data.displayAuthor is bool
+             && data.authorName is string
+             && data.authorName.size() <= 100
+             && (!data.displayAuthor || data.authorName.size() >= 1);
+    }
+
+    function validFeatureRequestVisibility(data) {
+      return (data.visibility == 'visible'
+                && data.hiddenReason == ''
+                && data.hiddenBy == '')
+             || (data.visibility == 'hidden'
+                && data.hiddenReason in ['withdrawn', 'moderated']
+                && data.hiddenBy in ['author', 'admin']);
+    }
+
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-      
+
       // 每日額度計數由代理 Cloud Functions 以 Admin SDK 寫入（Admin SDK 會略過
       // 規則）。client 只讀取以顯示剩餘額度，不可寫入，讓計量維持伺服器端為準。
       match /usage/{date} {
@@ -53,6 +96,131 @@ service cloud.firestore {
       allow update: if isRealUser()
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount'])
                     && request.resource.data.usageCount == resource.data.usageCount + 1;
+    }
+
+    // Public, text-only feature requests. Account ownership and voter records
+    // live in separate private collections so anonymous public requests never
+    // expose a Firebase uid or email address.
+    match /featureRequests/{requestId} {
+      allow read: if resource.data.visibility == 'visible'
+                  || isFeatureRequestAdmin()
+                  || ownsFeatureRequest(requestId);
+
+      allow create: if isRealUser()
+                    && request.resource.data.keys().hasOnly([
+                      'title', 'description', 'category', 'status',
+                      'displayAuthor', 'authorName', 'officialNote',
+                      'visibility', 'hiddenReason', 'hiddenBy', 'voteCount',
+                      'createdAt', 'updatedAt'
+                    ])
+                    && request.resource.data.keys().hasAll([
+                      'title', 'description', 'category', 'status',
+                      'displayAuthor', 'authorName', 'officialNote',
+                      'visibility', 'hiddenReason', 'hiddenBy', 'voteCount',
+                      'createdAt', 'updatedAt'
+                    ])
+                    && validFeatureRequestContent(request.resource.data)
+                    && request.resource.data.status == 'evaluating'
+                    && request.resource.data.officialNote == ''
+                    && validFeatureRequestVisibility(request.resource.data)
+                    && request.resource.data.visibility == 'visible'
+                    && request.resource.data.voteCount == 0
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.updatedAt == request.time
+                    && existsAfter(/databases/$(database)/documents/featureRequestOwners/$(requestId))
+                    && getAfter(/databases/$(database)/documents/featureRequestOwners/$(requestId)).data.authorId == request.auth.uid;
+
+      // The author may correct public content only during the first 30 minutes
+      // and only before the request leaves the evaluating state.
+      allow update: if ownsFeatureRequest(requestId)
+                    && resource.data.status == 'evaluating'
+                    && resource.data.visibility == 'visible'
+                    && request.time <= resource.data.createdAt + duration.value(30, 'm')
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'title', 'description', 'category', 'displayAuthor',
+                      'authorName', 'updatedAt'
+                    ])
+                    && validFeatureRequestContent(request.resource.data)
+                    && request.resource.data.updatedAt == request.time;
+
+      // Withdrawal is recoverable: it hides the request instead of deleting it.
+      allow update: if ownsFeatureRequest(requestId)
+                    && resource.data.visibility == 'visible'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'visibility', 'hiddenReason', 'hiddenBy', 'updatedAt'
+                    ])
+                    && request.resource.data.visibility == 'hidden'
+                    && request.resource.data.hiddenReason == 'withdrawn'
+                    && request.resource.data.hiddenBy == 'author'
+                    && request.resource.data.updatedAt == request.time;
+
+      // A vote count may change only in the same atomic write that creates or
+      // removes this user's private vote record.
+      allow update: if isRealUser()
+                    && resource.data.visibility == 'visible'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voteCount'])
+                    && request.resource.data.voteCount is int
+                    && request.resource.data.voteCount >= 0
+                    && (
+                      (request.resource.data.voteCount == resource.data.voteCount + 1
+                        && !exists(/databases/$(database)/documents/featureRequestVotes/$(request.auth.uid)/requests/$(requestId))
+                        && existsAfter(/databases/$(database)/documents/featureRequestVotes/$(request.auth.uid)/requests/$(requestId)))
+                      ||
+                      (request.resource.data.voteCount == resource.data.voteCount - 1
+                        && exists(/databases/$(database)/documents/featureRequestVotes/$(request.auth.uid)/requests/$(requestId))
+                        && !existsAfter(/databases/$(database)/documents/featureRequestVotes/$(request.auth.uid)/requests/$(requestId)))
+                    );
+
+      // The single verified owner account may move status, publish an official
+      // update, and hide or restore a request. Content and vote totals stay immutable.
+      allow update: if isFeatureRequestAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'status', 'officialNote', 'visibility', 'hiddenReason',
+                      'hiddenBy', 'updatedAt'
+                    ])
+                    && validFeatureRequestStatus(request.resource.data.status)
+                    && request.resource.data.officialNote is string
+                    && request.resource.data.officialNote.size() <= 1000
+                    && validFeatureRequestVisibility(request.resource.data)
+                    && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    match /featureRequestOwners/{requestId} {
+      allow read: if isFeatureRequestAdmin()
+                  || (isRealUser() && resource.data.authorId == request.auth.uid);
+
+      allow create: if isRealUser()
+                    && request.auth.token.keys().hasAll(['email'])
+                    && request.resource.data.keys().hasOnly(['authorId', 'authorEmail', 'createdAt'])
+                    && request.resource.data.authorId == request.auth.uid
+                    && request.resource.data.authorEmail == request.auth.token.email
+                    && request.resource.data.createdAt == request.time
+                    && existsAfter(/databases/$(database)/documents/featureRequests/$(requestId));
+
+      allow update, delete: if false;
+    }
+
+    match /featureRequestVotes/{userId}/requests/{requestId} {
+      allow read: if isRealUser() && request.auth.uid == userId;
+
+      allow create: if isRealUser()
+                    && request.auth.uid == userId
+                    && request.resource.data.keys().hasOnly(['requestId', 'userId', 'createdAt'])
+                    && request.resource.data.requestId == requestId
+                    && request.resource.data.userId == userId
+                    && request.resource.data.createdAt == request.time
+                    && get(/databases/$(database)/documents/featureRequests/$(requestId)).data.visibility == 'visible'
+                    && getAfter(/databases/$(database)/documents/featureRequests/$(requestId)).data.voteCount
+                       == get(/databases/$(database)/documents/featureRequests/$(requestId)).data.voteCount + 1;
+
+      allow delete: if isRealUser()
+                    && request.auth.uid == userId
+                    && getAfter(/databases/$(database)/documents/featureRequests/$(requestId)).data.voteCount
+                       == get(/databases/$(database)/documents/featureRequests/$(requestId)).data.voteCount - 1;
+
+      allow update: if false;
     }
 
     // 由 feedback Function（admin SDK）寫入的防濫用限流桶。admin SDK 會略過
