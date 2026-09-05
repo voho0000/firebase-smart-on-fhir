@@ -12,6 +12,7 @@ import {handleClaudeChat} from "./services/claude/handler";
 import {handleOpenAiCompatibleGateway} from
   "./services/openai-compatible-gateway/handler";
 import {parseList} from "./utils/parser";
+import {handleMembershipAdmin} from "./services/membership/handler";
 
 setGlobalOptions({
   maxInstances: 10,
@@ -101,6 +102,10 @@ const DEV_PROXY_RUNTIME = {
 };
 
 export const dev = {
+  manageTenantMembership: onRequest(
+    {timeoutSeconds: 60, memory: "512MiB", maxInstances: 2},
+    withCorsAndErrorHandling(handleMembershipAdmin, DEV_HANDLER_OPTIONS),
+  ),
   proxyWhisper: onRequest(
     DEV_PROXY_RUNTIME,
     withCorsAndErrorHandling(handleWhisper, DEV_HANDLER_OPTIONS),

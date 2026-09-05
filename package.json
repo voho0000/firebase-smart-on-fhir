@@ -7,6 +7,7 @@
     "test:rules": "firebase emulators:exec --only firestore \"node --test tests/*.test.mjs\"",
     "test:functions": "QUOTA_DAILY_LIMIT=3 QUOTA_ANON_LIMIT=2 QUOTA_DAILY_LIMIT_PERPLEXITY=2 QUOTA_DAILY_LIMIT_WHISPER=2 QUOTA_DAILY_LIMIT_GATEWAY=3 QUOTA_ANON_LIMIT_GATEWAY=2 firebase emulators:exec --only firestore --project demo-mediprisma \"node functions/node_modules/jest/bin/jest.js -c jest.functions.config.cjs\"",
     "test:e2e:app": "firebase emulators:exec --only auth,firestore --project demo-mediprisma \"npm --prefix '../medical-note-smart-on-fhir' run test:e2e:emulated\"",
+    "emulators:studio": "firebase emulators:start --only auth,firestore --project demo-mediprisma",
     "test": "npm run test:rules && npm run test:functions"
   },
   "devDependencies": {
