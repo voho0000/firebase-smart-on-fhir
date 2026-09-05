@@ -54,6 +54,14 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
 
+      // Canonical tenant/role authority. Clients may read only their own
+      // memberships to select an active workspace. Only Admin SDK / the
+      // membership management Function may write or disable these records.
+      match /memberships/{tenantId} {
+        allow read: if isRealUser() && request.auth.uid == userId;
+        allow write: if false;
+      }
+      
       // 每日額度計數由代理 Cloud Functions 以 Admin SDK 寫入（Admin SDK 會略過
       // 規則）。client 只讀取以顯示剩餘額度，不可寫入，讓計量維持伺服器端為準。
       match /usage/{date} {
@@ -68,34 +76,147 @@ service cloud.firestore {
       match /clinicalInsightPanels/{panelId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // 我的最愛：每筆是使用者自己的一份範本副本（不是參照），只有本人可讀寫。
+      match /promptFavorites/{promptId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
       
       match /chats/{chatId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
     
+    function validSharedPrompt(data) {
+      return data.keys().hasAll(['title', 'prompt', 'types', 'category', 'specialty', 'audience',
+                                'tags', 'authorId', 'usageCount', 'createdAt', 'updatedAt'])
+             && data.keys().hasOnly(['title', 'description', 'prompt', 'types', 'category', 'specialty',
+                 'audience', 'tags', 'authorId', 'authorName', 'isAnonymous', 'usageCount',
+                 'createdAt', 'updatedAt', 'outputFormat', 'languagePolicy', 'body', 'exampleOutput'])
+             && (!('exampleOutput' in data) || (data.exampleOutput is string && data.exampleOutput.size() <= 20000))
+             && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+             && data.prompt is string && data.prompt.size() > 0
+             && data.get('description', '') is string && data.get('description', '').size() <= 180
+             && data.types is list && data.types.size() > 0 && data.types.size() <= 2
+             && data.types.hasOnly(['chat', 'summary'])
+             && data.category in ['soap', 'admission', 'discharge', 'safety', 'summary', 'progress', 'consult', 'procedure', 'other']
+             && data.specialty is list && data.specialty.size() <= 37
+             && data.specialty.hasOnly(['general', 'internal', 'cardiology', 'gastroenterology', 'pulmonology',
+                 'nephrology', 'rheumatology', 'immunology', 'hematology', 'medical_oncology', 'endocrinology',
+                 'infectious_diseases', 'surgery', 'neurosurgery', 'emergency', 'critical_care', 'pediatrics',
+                 'obstetrics', 'psychiatry', 'neurology', 'rehabilitation', 'anesthesiology', 'ophthalmology',
+                 'dermatology', 'urology', 'orthopedics', 'ent', 'radiology', 'radiation_oncology', 'pathology',
+                 'anatomic_pathology', 'clinical_pathology', 'nuclear_medicine', 'plastic_surgery',
+                 'family_medicine', 'occupational_medicine', 'other'])
+             && data.audience is list && data.audience.size() > 0 && data.audience.size() <= 2
+             && data.audience.hasOnly(['medical', 'patient'])
+             && data.tags is list && data.tags.size() <= 8
+             && validTag(data.tags, 0) && validTag(data.tags, 1) && validTag(data.tags, 2) && validTag(data.tags, 3)
+             && validTag(data.tags, 4) && validTag(data.tags, 5) && validTag(data.tags, 6) && validTag(data.tags, 7)
+             && data.authorId is string
+             && data.get('authorName', '') is string && data.get('authorName', '').size() <= 100
+             && data.get('isAnonymous', false) is bool
+             && (!data.get('isAnonymous', false) || !data.keys().hasAny(['authorName']))
+             && data.usageCount is int && data.usageCount >= 0
+             && data.createdAt is timestamp && data.updatedAt is timestamp
+             && data.get('outputFormat', 'markdown') in ['plain-text', 'markdown', 'html']
+             && data.get('languagePolicy', 'interface-language') in ['interface-language', 'follow-template'];
+    }
+
+    function validTag(tags, index) {
+      return tags.size() <= index || (tags[index] is string && tags[index].size() <= 24);
+    }
+
+    function validBodyReference(data, promptId) {
+      return !data.keys().hasAny(['body']) || (
+        data.body is map && data.body.keys().hasOnly(['id', 'chunks', 'length'])
+        && data.body.id is string && data.body.chunks is int && data.body.chunks > 0
+        && data.body.length is int && data.body.length > 0
+        && get(/databases/$(database)/documents/templateBodies/$(data.body.id)).data.ownerId == request.auth.uid
+        && get(/databases/$(database)/documents/templateBodies/$(data.body.id)).data.scope == 'shared'
+        && get(/databases/$(database)/documents/templateBodies/$(data.body.id)).data.promptId == promptId
+        && get(/databases/$(database)/documents/templateBodies/$(data.body.id)).data.ready == true
+        && get(/databases/$(database)/documents/templateBodies/$(data.body.id)).data.chunks == data.body.chunks
+        && get(/databases/$(database)/documents/templateBodies/$(data.body.id)).data.length == data.body.length
+      );
+    }
+
     match /sharedPrompts/{promptId} {
-      // 允許所有人讀取（包括未登入使用者）
       allow read: if true;
-
-      // 只有登入使用者（非匿名）可以建立，且 authorId 必須是自己（不可冒名）、
-      // usageCount 必須從 0 開始
-      allow create: if isRealUser()
-                    && request.resource.data.authorId == request.auth.uid
-                    && request.resource.data.usageCount == 0;
-
-      // 只有作者可以刪除
+      allow create: if isRealUser() && request.resource.data.authorId == request.auth.uid
+                    && request.resource.data.usageCount == 0
+                    && validSharedPrompt(request.resource.data)
+                    && validBodyReference(request.resource.data, promptId);
       allow delete: if isRealUser() && request.auth.uid == resource.data.authorId;
-
-      // 作者可以更新內容，但不可把 authorId 改成別人
-      allow update: if isRealUser()
-                    && request.auth.uid == resource.data.authorId
-                    && request.resource.data.authorId == resource.data.authorId;
-
-      // 任何登入用戶（非匿名）都可以更新 usageCount，但只能 +1（防止灌水或歸零）
+      allow update: if isRealUser() && request.auth.uid == resource.data.authorId
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'title', 'description', 'prompt', 'types', 'category', 'specialty', 'audience',
+                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'body', 'updatedAt', 'exampleOutput'])
+                    && validSharedPrompt(request.resource.data)
+                    && validBodyReference(request.resource.data, promptId);
+      // This is the only route for a count change, including for the author.
       allow update: if isRealUser()
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount'])
+                    && request.resource.data.usageCount is int
                     && request.resource.data.usageCount == resource.data.usageCount + 1;
+    }
+
+    function bodyIsPublished(data, bodyId) {
+      return data.scope == 'shared'
+             && exists(/databases/$(database)/documents/sharedPrompts/$(data.promptId))
+             && get(/databases/$(database)/documents/sharedPrompts/$(data.promptId)).data.get('body', {}).get('id', '') == bodyId;
+    }
+
+    // Keep a committed private body intact even if a write acknowledgement was
+    // lost and its client attempts failure cleanup.
+    function bodyIsReferenced(data, bodyId) {
+      return bodyIsPublished(data, bodyId) || (data.scope == 'private'
+             && exists(/databases/$(database)/documents/users/$(data.ownerId)/$(data.collectionName)/$(data.itemId))
+             && get(/databases/$(database)/documents/users/$(data.ownerId)/$(data.collectionName)/$(data.itemId)).data.get('textBody', {}).get('id', '') == bodyId);
+    }
+
+    function ownsBody(data) {
+      return request.auth != null && data.ownerId == request.auth.uid;
+    }
+
+    function canReadBody(data, bodyId) {
+      return ownsBody(data) || (data.ready == true && bodyIsPublished(data, bodyId));
+    }
+
+    // An immutable body is private until a complete parent points to it.
+    // Large private chat/summary templates use the same format, scoped to owner.
+    match /templateBodies/{bodyId} {
+      allow read: if canReadBody(resource.data, bodyId);
+      allow create: if request.auth != null
+                    && request.resource.data.keys().hasAll(['ownerId', 'scope', 'chunks', 'length', 'ready'])
+                    && request.resource.data.keys().hasOnly(['ownerId', 'scope', 'promptId', 'collectionName', 'itemId', 'chunks', 'length', 'ready'])
+                    && ownsBody(request.resource.data)
+                    && request.resource.data.chunks is int && request.resource.data.chunks > 0
+                    && request.resource.data.length is int && request.resource.data.length >= 0
+                    && request.resource.data.ready == false
+                    && ((request.resource.data.scope == 'private'
+                            && request.resource.data.collectionName in ['chatTemplates', 'clinicalInsightPanels']
+                            && request.resource.data.itemId is string)
+                        || (isRealUser() && request.resource.data.scope == 'shared'
+                            && request.resource.data.promptId is string));
+      allow update: if ownsBody(resource.data)
+                    && resource.data.ready == false && request.resource.data.ready == true
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ready']);
+      allow delete: if ownsBody(resource.data) && !bodyIsReferenced(resource.data, bodyId);
+
+      match /chunks/{chunkId} {
+        function manifest() {
+          return get(/databases/$(database)/documents/templateBodies/$(bodyId)).data;
+        }
+        allow read: if canReadBody(manifest(), bodyId);
+        allow create: if ownsBody(manifest()) && manifest().ready == false
+                      && request.resource.data.keys().hasOnly(['index', 'text'])
+                      && request.resource.data.index is int && request.resource.data.index >= 0
+                      && request.resource.data.index < manifest().chunks
+                      && request.resource.data.text is string;
+        allow update: if false;
+        allow delete: if ownsBody(manifest()) && !bodyIsReferenced(manifest(), bodyId);
+      }
     }
 
     // Public, text-only feature requests. Account ownership and voter records
@@ -226,6 +347,13 @@ service cloud.firestore {
     // 由 feedback Function（admin SDK）寫入的防濫用限流桶。admin SDK 會略過
     // 規則，但 client 不該讀寫——明確拒絕以防竄改。
     match /feedbackRateLimits/{doc} {
+      allow read, write: if false;
+    }
+
+    // Reserved server-governed tenant collections. Reject audit and approved
+    // memory are accessed through a trusted service so raw rejection text can
+    // never be queried by arbitrary clients or reused as model input.
+    match /tenants/{tenantId}/{document=**} {
       allow read, write: if false;
     }
   }

@@ -121,41 +121,42 @@ test('user can read/write own chats but not another user data', async () => {
   await assertFails(getDoc(doc(real('alice'), 'users/bob/chats/c1')))
 })
 
+const sharedPromptData = (authorId, usageCount = 0) => ({ authorId, usageCount, title: 'Template', prompt: 'hi', types: ['chat'], category: 'other', specialty: ['general'], audience: ['medical'], tags: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
 // --------------------------------------------------------------- sharedPrompts
 test('sharedPrompts: world-readable (even unauthenticated)', async () => {
-  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), { authorId: 'alice', usageCount: 0, prompt: 'hi' }))
+  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), sharedPromptData('alice', 0)))
   await assertSucceeds(getDoc(doc(unauth(), 'sharedPrompts/p1')))
 })
 
 test('sharedPrompts: real user can create with own authorId and usageCount 0', async () => {
-  await assertSucceeds(setDoc(doc(real('alice'), 'sharedPrompts/p1'), { authorId: 'alice', usageCount: 0, prompt: 'hi' }))
+  await assertSucceeds(setDoc(doc(real('alice'), 'sharedPrompts/p1'), sharedPromptData('alice', 0)))
 })
 
 test('sharedPrompts: anonymous user CANNOT create', async () => {
-  await assertFails(setDoc(doc(anon('anon1'), 'sharedPrompts/p1'), { authorId: 'anon1', usageCount: 0, prompt: 'hi' }))
+  await assertFails(setDoc(doc(anon('anon1'), 'sharedPrompts/p1'), sharedPromptData('anon1', 0)))
 })
 
 test('sharedPrompts: cannot spoof authorId on create', async () => {
-  await assertFails(setDoc(doc(real('alice'), 'sharedPrompts/p1'), { authorId: 'bob', usageCount: 0, prompt: 'hi' }))
+  await assertFails(setDoc(doc(real('alice'), 'sharedPrompts/p1'), sharedPromptData('bob', 0)))
 })
 
 test('sharedPrompts: usageCount must start at 0', async () => {
-  await assertFails(setDoc(doc(real('alice'), 'sharedPrompts/p1'), { authorId: 'alice', usageCount: 7, prompt: 'hi' }))
+  await assertFails(setDoc(doc(real('alice'), 'sharedPrompts/p1'), sharedPromptData('alice', 7)))
 })
 
 test('sharedPrompts: any real user may increment usageCount by exactly 1', async () => {
-  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), { authorId: 'alice', usageCount: 0, prompt: 'hi' }))
+  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), sharedPromptData('alice', 0)))
   await assertSucceeds(updateDoc(doc(real('bob'), 'sharedPrompts/p1'), { usageCount: 1 }))
 })
 
 test('sharedPrompts: cannot reset or inflate usageCount by != +1', async () => {
-  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), { authorId: 'alice', usageCount: 5, prompt: 'hi' }))
+  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), sharedPromptData('alice', 5)))
   await assertFails(updateDoc(doc(real('bob'), 'sharedPrompts/p1'), { usageCount: 0 }))
   await assertFails(updateDoc(doc(real('bob'), 'sharedPrompts/p1'), { usageCount: 99 }))
 })
 
 test('sharedPrompts: only the author can delete', async () => {
-  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), { authorId: 'alice', usageCount: 0, prompt: 'hi' }))
+  await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), sharedPromptData('alice', 0)))
   await assertFails(deleteDoc(doc(real('bob'), 'sharedPrompts/p1')))
   await assertSucceeds(deleteDoc(doc(real('alice'), 'sharedPrompts/p1')))
 })
@@ -294,4 +295,29 @@ test('featureRequests: administrator can identify submitters without exposing th
 test('feedbackRateLimits: client cannot read or write (admin-only bucket)', async () => {
   await assertFails(getDoc(doc(real('alice'), 'feedbackRateLimits/x')))
   await assertFails(setDoc(doc(real('alice'), 'feedbackRateLimits/x'), { n: 1 }))
+})
+
+// ------------------------------------------------------ tenant memberships
+test('membership: real user can read only their own server-created membership', async () => {
+  await seed((db) => setDoc(doc(db, 'users/alice/memberships/hospital-a'), {
+    uid: 'alice', tenant_id: 'hospital-a', role: 'builder', status: 'active',
+  }))
+  await assertSucceeds(getDoc(doc(real('alice'), 'users/alice/memberships/hospital-a')))
+  await assertFails(getDoc(doc(real('bob'), 'users/alice/memberships/hospital-a')))
+})
+
+test('membership: client cannot create or alter even their own role', async () => {
+  const ref = doc(real('alice'), 'users/alice/memberships/hospital-a')
+  await assertFails(setDoc(ref, { uid: 'alice', tenant_id: 'hospital-a', role: 'owner', status: 'active' }))
+  await seed((db) => setDoc(doc(db, 'users/alice/memberships/hospital-a'), {
+    uid: 'alice', tenant_id: 'hospital-a', role: 'member', status: 'active',
+  }))
+  await assertFails(updateDoc(ref, { role: 'owner' }))
+})
+
+test('tenant governance: clients cannot read or write memory and audit collections directly', async () => {
+  await seed((db) => setDoc(doc(db, 'tenants/hospital-a/memory/m1'), { guidance: 'server governed' }))
+  await assertFails(getDoc(doc(real('alice'), 'tenants/hospital-a/memory/m1')))
+  await assertFails(setDoc(doc(real('alice'), 'tenants/hospital-a/memory/m2'), { guidance: 'client write' }))
+  await assertFails(getDoc(doc(real('alice'), 'tenants/hospital-b/memory/m1')))
 })
