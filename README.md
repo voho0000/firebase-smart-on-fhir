@@ -96,13 +96,14 @@ firebase functions:secrets:set RESEND_API_KEY
 Secrets 綁在 `setGlobalOptions`，dev 組與正式組共用同一組，無需重複設定。
 `proxyOpenAiCompatibleGateway` 會以 `secrets: []` 覆寫全域設定，不會取得上述 owner-funded keys。
 
-BYO Gateway 預設允許 NVIDIA API Catalog 與 J3Soon AI。若要改用其他可信 provider，設定逗號分隔的精確 API Base URL（設定後會取代預設清單）：
+BYO Gateway 對使用者公開支援 NVIDIA API Catalog、OpenRouter 與 Cerebras。若要改用其他可信 provider，設定逗號分隔的精確 API Base URL（設定後會取代預設清單）：
 
 ```bash
-OPENAI_COMPATIBLE_GATEWAY_BASE_URLS=https://integrate.api.nvidia.com/v1,https://ai.j3soon.com/v1,https://approved-provider.example/v1
+OPENAI_COMPATIBLE_GATEWAY_BASE_URLS=https://integrate.api.nvidia.com/v1,https://openrouter.ai/api/v1,https://api.cerebras.ai/v1,https://approved-provider.example/v1
 ```
 
 只接受公開 HTTPS hostname、443 port、`models` 與 `chat/completions`；不接受任意 URL、IP、redirect、query 或 fragment。
+Cerebras 請求會將相容 SDK 常用的 `max_tokens` 正規化成目前 API 使用的 `max_completion_tokens`。
 
 ## 開發指令
 

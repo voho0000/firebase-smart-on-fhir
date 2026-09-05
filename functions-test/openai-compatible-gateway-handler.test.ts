@@ -131,6 +131,65 @@ describe("handleOpenAiCompatibleGateway", () => {
     expect(Buffer.concat(res._chunks).toString()).toContain("OK");
   });
 
+  it("forwards OpenRouter requests to its exact API base", async () => {
+    const fetchMock = jest.fn(async () => new Response(JSON.stringify({
+      choices: [{message: {content: "OK"}}],
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    global.fetch = fetchMock as typeof fetch;
+    const req = mockReq("POST", {
+      "x-upstream-base-url": "https://openrouter.ai/api/v1",
+      "x-upstream-path": "chat/completions",
+      "x-upstream-api-key": "openrouter-user-key",
+    }, {
+      model: "openai/gpt-5.2",
+      messages: [{role: "user", content: "hello"}],
+      stream: true,
+    });
+    const res = mockRes();
+
+    await handleOpenAiCompatibleGateway(req, res as never);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(new Headers(init?.headers).get("Authorization"))
+      .toBe("Bearer openrouter-user-key");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: "openai/gpt-5.2",
+      stream: true,
+    });
+  });
+
+  it("normalizes the completion-token field for Cerebras", async () => {
+    const fetchMock = jest.fn(async () => new Response(JSON.stringify({
+      choices: [{message: {content: "OK"}}],
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    global.fetch = fetchMock as typeof fetch;
+    const req = mockReq("POST", {
+      "x-upstream-base-url": "https://api.cerebras.ai/v1",
+      "x-upstream-path": "chat/completions",
+      "x-upstream-api-key": "cerebras-user-key",
+    }, {
+      model: "gpt-oss-120b",
+      messages: [{role: "user", content: "hello"}],
+      stream: false,
+      max_tokens: 512,
+    });
+    const res = mockRes();
+
+    await handleOpenAiCompatibleGateway(req, res as never);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.cerebras.ai/v1/chat/completions");
+    expect(new Headers(init?.headers).get("Authorization"))
+      .toBe("Bearer cerebras-user-key");
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({
+      model: "gpt-oss-120b",
+      max_completion_tokens: 512,
+    });
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
   it("rejects a non-allow-listed upstream before making a request", async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as typeof fetch;

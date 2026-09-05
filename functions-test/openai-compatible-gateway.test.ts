@@ -25,6 +25,22 @@ describe("OpenAI-compatible gateway target validation", () => {
       "GET",
     )).toBe("https://integrate.api.nvidia.com/v1/models");
     expect(getAllowedGatewayBaseUrls()).toContain(
+      "https://openrouter.ai/api/v1",
+    );
+    expect(resolveGatewayTarget(
+      "https://openrouter.ai/api/v1/",
+      "chat/completions",
+      "POST",
+    )).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(getAllowedGatewayBaseUrls()).toContain(
+      "https://api.cerebras.ai/v1",
+    );
+    expect(resolveGatewayTarget(
+      "https://api.cerebras.ai/v1/",
+      "models",
+      "GET",
+    )).toBe("https://api.cerebras.ai/v1/models");
+    expect(getAllowedGatewayBaseUrls()).toContain(
       "https://ai.j3soon.com/v1",
     );
     expect(resolveGatewayTarget(

@@ -3,6 +3,8 @@ import {isIP} from "node:net";
 
 const DEFAULT_BASE_URLS = [
   "https://integrate.api.nvidia.com/v1",
+  "https://openrouter.ai/api/v1",
+  "https://api.cerebras.ai/v1",
   "https://ai.j3soon.com/v1",
 ];
 

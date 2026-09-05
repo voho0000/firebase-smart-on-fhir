@@ -8,6 +8,28 @@ import {resolveGatewayTarget} from "./target";
 
 const MAX_JSON_BYTES = 5 * 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 8 * 60 * 1000;
+const CEREBRAS_CHAT_URL = "https://api.cerebras.ai/v1/chat/completions";
+
+const serializeUpstreamBody = (
+  target: string,
+  payload: Record<string, unknown>,
+): string => {
+  if (target !== CEREBRAS_CHAT_URL) return JSON.stringify(payload);
+
+  // Cerebras' current Chat Completions contract uses the newer OpenAI field.
+  // Normalize the legacy field emitted by compatibility SDKs while preserving
+  // an explicit max_completion_tokens value supplied by the caller.
+  const normalized = {...payload};
+  const legacyMaxTokens = normalized["max_tokens"];
+  delete normalized["max_tokens"];
+  if (
+    legacyMaxTokens !== undefined &&
+    normalized["max_completion_tokens"] === undefined
+  ) {
+    normalized["max_completion_tokens"] = legacyMaxTokens;
+  }
+  return JSON.stringify(normalized);
+};
 
 const copyResponseHeaders = (upstream: globalThis.Response, res: Response) => {
   const contentType = upstream.headers.get("content-type");
@@ -115,7 +137,7 @@ export const handleOpenAiCompatibleGateway = async (
   let body: string | undefined;
   if (req.method === "POST") {
     try {
-      body = JSON.stringify(parseJsonBody(req));
+      body = serializeUpstreamBody(target, parseJsonBody(req));
     } catch {
       res.status(400).json({error: "Invalid JSON payload"});
       return;

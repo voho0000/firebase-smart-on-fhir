@@ -88,15 +88,46 @@ export const extractOpenAiResponseText = (
   return text || null;
 };
 
-const errorDetail = (error: unknown): string => (
-  isAxiosError(error) ?
-    JSON.stringify(error.response?.data)?.slice(0, 1500) :
-    String(error)
-);
+const upstreamErrorContext = (error: unknown): Record<string, unknown> => {
+  if (!isAxiosError(error)) {
+    return {
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  // With responseType:"stream", response.data is a live Node stream. Trying
+  // to JSON.stringify it dumps internal buffers into Cloud Logging and still
+  // hides the useful signal. Keep only bounded, non-secret diagnostics.
+  const requestId = error.response?.headers?.["x-request-id"];
+  return {
+    message: error.message,
+    code: error.code,
+    status: error.response?.status,
+    requestId: typeof requestId === "string" ? requestId : undefined,
+  };
+};
+
+const responsesError = (message: string) => ({
+  error: {
+    type: "upstream_error",
+    code: "upstream_error",
+    message,
+    param: null,
+  },
+});
+
+const responsesErrorEvent = (message: string): string => `data: ${
+  JSON.stringify({
+    type: "error",
+    sequence_number: 0,
+    error: responsesError(message).error,
+  })
+}\n\n`;
 
 export const handleOpenAiResponses = async (
   payload: Record<string, unknown>,
   res: Response,
+  post: typeof axios.post = axios.post,
 ): Promise<void> => {
   const apiKey = getOpenAiApiKey();
   const request = sanitizeResponsesPayload(payload);
@@ -108,38 +139,42 @@ export const handleOpenAiResponses = async (
 
   if (request["stream"] !== true) {
     try {
-      const upstream = await axios.post(url, request, {headers});
+      const upstream = await post(url, request, {headers});
       res.status(200).json({
         message: extractOpenAiResponseText(upstream.data),
         openAiResponse: upstream.data,
       });
     } catch (error) {
       logger.error("OpenAI Responses request failed:", {
-        detail: errorDetail(error),
+        ...upstreamErrorContext(error),
       });
       if (!res.writableEnded) {
-        res.status(502).json({error: "Upstream request failed"});
+        res.status(502).json(responsesError("Upstream request failed"));
       }
     }
     return;
   }
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.write(`:${" ".repeat(2048)}\n\n`);
-  {
-    const responseWithFlush = res as Response & {flush?: () => void};
-    if (typeof responseWithFlush.flush === "function") {
-      responseWithFlush.flush();
-    }
-  }
-
   try {
-    const upstream = await axios.post(url, request, {
+    const upstream = await post(url, request, {
       headers,
       responseType: "stream",
     });
+
+    // Do not commit HTTP 200 until OpenAI has accepted the request. If the
+    // upstream rejects before streaming, the catch block can still return a
+    // regular 502 JSON response that the OpenAI SDK understands.
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.write(`:${" ".repeat(2048)}\n\n`);
+    {
+      const responseWithFlush = res as Response & {flush?: () => void};
+      if (typeof responseWithFlush.flush === "function") {
+        responseWithFlush.flush();
+      }
+    }
+
     upstream.data.on("data", (chunk: Buffer) => {
       if (!res.writableEnded) {
         try {
@@ -160,21 +195,21 @@ export const handleOpenAiResponses = async (
     upstream.data.on("error", (error: Error) => {
       logger.error("OpenAI Responses stream error:", error);
       if (!res.writableEnded) {
-        res.write(
-          `data: ${JSON.stringify({error: "stream error"})}\n\n`,
-        );
+        res.write(responsesErrorEvent("Upstream stream failed"));
         res.end();
       }
     });
   } catch (error) {
     logger.error("OpenAI Responses streaming request failed:", {
-      detail: errorDetail(error),
+      ...upstreamErrorContext(error),
     });
     if (!res.writableEnded) {
-      res.write(
-        `data: ${JSON.stringify({error: "Upstream request failed"})}\n\n`,
-      );
-      res.end();
+      if (!res.headersSent) {
+        res.status(502).json(responsesError("Upstream request failed"));
+      } else {
+        res.write(responsesErrorEvent("Upstream request failed"));
+        res.end();
+      }
     }
   }
 };
