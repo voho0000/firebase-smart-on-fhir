@@ -92,7 +92,7 @@ service cloud.firestore {
                                 'tags', 'authorId', 'usageCount', 'createdAt', 'updatedAt'])
              && data.keys().hasOnly(['title', 'description', 'prompt', 'types', 'category', 'specialty',
                  'audience', 'tags', 'authorId', 'authorName', 'isAnonymous', 'usageCount',
-                 'createdAt', 'updatedAt', 'outputFormat', 'languagePolicy', 'body', 'exampleOutput', 'tenantId'])
+                 'createdAt', 'updatedAt', 'outputFormat', 'languagePolicy', 'body', 'exampleOutput', 'tenantId', 'isPublic'])
              && (!('exampleOutput' in data) || (data.exampleOutput is string && data.exampleOutput.size() <= 20000))
              && (!('tenantId' in data) || (data.tenantId is string && data.tenantId.size() > 0 && data.tenantId.size() <= 128))
              && data.title is string && data.title.size() > 0 && data.title.size() <= 100
@@ -121,7 +121,8 @@ service cloud.firestore {
              && data.usageCount is int && data.usageCount >= 0
              && data.createdAt is timestamp && data.updatedAt is timestamp
              && data.get('outputFormat', 'markdown') in ['plain-text', 'markdown', 'html']
-             && data.get('languagePolicy', 'interface-language') in ['interface-language', 'follow-template'];
+             && data.get('languagePolicy', 'interface-language') in ['interface-language', 'follow-template']
+             && data.get('isPublic', true) is bool;
     }
 
     function validTag(tags, index) {
@@ -143,9 +144,11 @@ service cloud.firestore {
     }
 
     match /sharedPrompts/{promptId} {
-      allow read: if true;
+      allow read: if (resource.data.keys().hasAll(['isPublic']) && resource.data.isPublic == true)
+                  || (isRealUser() && request.auth.uid == resource.data.authorId);
       allow create: if isRealUser() && request.resource.data.authorId == request.auth.uid
                     && request.resource.data.usageCount == 0
+                    && request.resource.data.keys().hasAll(['isPublic'])
                     && !request.resource.data.keys().hasAny(['tenantId'])
                     && validSharedPrompt(request.resource.data)
                     && validBodyReference(request.resource.data, promptId);
@@ -153,11 +156,13 @@ service cloud.firestore {
       allow update: if isRealUser() && request.auth.uid == resource.data.authorId
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                       'title', 'description', 'prompt', 'types', 'category', 'specialty', 'audience',
-                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'body', 'updatedAt', 'exampleOutput'])
+                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'body', 'updatedAt', 'exampleOutput', 'isPublic'])
                     && validSharedPrompt(request.resource.data)
                     && validBodyReference(request.resource.data, promptId);
       // This is the only route for a count change, including for the author.
       allow update: if isRealUser()
+                    && ((resource.data.keys().hasAll(['isPublic']) && resource.data.isPublic == true)
+                        || request.auth.uid == resource.data.authorId)
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount'])
                     && request.resource.data.usageCount is int
                     && request.resource.data.usageCount == resource.data.usageCount + 1;
@@ -198,16 +203,21 @@ service cloud.firestore {
                     && request.resource.data.usageCount == resource.data.usageCount + 1;
     }
 
-    function bodyIsPublished(data, bodyId) {
+    function bodyIsReferencedByShared(data, bodyId) {
       return data.scope == 'shared'
              && exists(/databases/$(database)/documents/sharedPrompts/$(data.promptId))
              && get(/databases/$(database)/documents/sharedPrompts/$(data.promptId)).data.get('body', {}).get('id', '') == bodyId;
     }
 
+    function bodyIsPublished(data, bodyId) {
+      return bodyIsReferencedByShared(data, bodyId)
+             && get(/databases/$(database)/documents/sharedPrompts/$(data.promptId)).data.isPublic == true;
+    }
+
     // Keep a committed private body intact even if a write acknowledgement was
     // lost and its client attempts failure cleanup.
     function bodyIsReferenced(data, bodyId) {
-      return bodyIsPublished(data, bodyId) || (data.scope == 'private'
+      return bodyIsReferencedByShared(data, bodyId) || (data.scope == 'private'
              && exists(/databases/$(database)/documents/users/$(data.ownerId)/$(data.collectionName)/$(data.itemId))
              && get(/databases/$(database)/documents/users/$(data.ownerId)/$(data.collectionName)/$(data.itemId)).data.get('textBody', {}).get('id', '') == bodyId);
     }

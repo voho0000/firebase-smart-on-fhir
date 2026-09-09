@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import assert from 'node:assert/strict'
 import test, { before, after, beforeEach } from 'node:test'
 import {
   initializeTestEnvironment,
@@ -121,11 +122,32 @@ test('user can read/write own chats but not another user data', async () => {
   await assertFails(getDoc(doc(real('alice'), 'users/bob/chats/c1')))
 })
 
-const sharedPromptData = (authorId, usageCount = 0) => ({ authorId, usageCount, title: 'Template', prompt: 'hi', types: ['chat'], category: 'other', specialty: ['general'], audience: ['medical'], tags: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+const sharedPromptData = (authorId, usageCount = 0, isPublic = true) => ({ authorId, usageCount, isPublic, title: 'Template', prompt: 'hi', types: ['chat'], category: 'other', specialty: ['general'], audience: ['medical'], tags: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
 // --------------------------------------------------------------- sharedPrompts
 test('sharedPrompts: world-readable (even unauthenticated)', async () => {
   await seed((db) => setDoc(doc(db, 'sharedPrompts/p1'), sharedPromptData('alice', 0)))
   await assertSucceeds(getDoc(doc(unauth(), 'sharedPrompts/p1')))
+})
+
+test('sharedPrompts: private records are owner-only and public queries must declare visibility', async () => {
+  await seed(async (db) => {
+    await setDoc(doc(db, 'sharedPrompts/public'), sharedPromptData('alice', 0, true))
+    await setDoc(doc(db, 'sharedPrompts/private'), sharedPromptData('alice', 0, false))
+  })
+  await assertSucceeds(getDoc(doc(real('alice'), 'sharedPrompts/private')))
+  await assertFails(getDoc(doc(real('bob'), 'sharedPrompts/private')))
+  await assertFails(getDoc(doc(unauth(), 'sharedPrompts/private')))
+  const publicRows = await assertSucceeds(getDocs(query(
+    collection(unauth(), 'sharedPrompts'),
+    where('isPublic', '==', true),
+  )))
+  assert.equal(publicRows.size, 1)
+  await assertFails(getDocs(collection(unauth(), 'sharedPrompts')))
+  const mine = await assertSucceeds(getDocs(query(
+    collection(real('alice'), 'sharedPrompts'),
+    where('authorId', '==', 'alice'),
+  )))
+  assert.equal(mine.size, 2)
 })
 
 test('sharedPrompts: real user can create with own authorId and usageCount 0', async () => {

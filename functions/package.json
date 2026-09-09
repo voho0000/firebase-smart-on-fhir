@@ -8,6 +8,7 @@
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "seed:studio:emulator": "FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-mediprisma node src/services/membership/seed-emulator.mjs",
+    "migrate:prompt-visibility": "node scripts/backfill-shared-prompt-visibility.mjs",
     "deploy": "firebase deploy --only functions",
     "deploy:dev": "firebase deploy --only functions:dev",
     "deploy:prod": "firebase deploy --only functions:proxyWhisper,functions:proxyGeminiChat,functions:proxyChatCompletion,functions:proxyPerplexitySearch,functions:proxyClaudeChat,functions:proxyOpenAiCompatibleGateway,functions:sendFeedback",
