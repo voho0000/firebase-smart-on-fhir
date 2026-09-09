@@ -16,7 +16,7 @@ const user = (id = 'alice') => env.authenticatedContext(id, { firebase: { sign_i
 const guest = () => env.unauthenticatedContext().firestore()
 const data = (overrides = {}) => ({ title: 'Template', prompt: 'Source', types: ['summary'], category: 'summary',
   specialty: ['general'], audience: ['medical'], tags: [], authorId: 'alice', usageCount: 0,
-  createdAt: new Date(), updatedAt: new Date(), outputFormat: 'html', ...overrides })
+  createdAt: new Date(), updatedAt: new Date(), outputFormat: 'html', isPublic: true, ...overrides })
 
 for (const [field, value] of [['title', 42], ['prompt', {}], ['tags', [42]], ['types', ['unknown']],
   ['specialty', ['unknown']], ['audience', []], ['usageCount', 12], ['outputFormat', 'script'],
@@ -34,6 +34,10 @@ test('author can edit content but cannot replace ownership, createdAt, or usageC
     await assertFails(ref.update(patch))
   }
   await assertSucceeds(ref.update({ usageCount: 1 }))
+  await assertSucceeds(ref.update({ isPublic: false, updatedAt: new Date() }))
+  await assertSucceeds(ref.get())
+  await assertFails(user('bob').doc('sharedPrompts/p').get())
+  await assertFails(guest().doc('sharedPrompts/p').get())
   await assertFails(user('bob').doc('sharedPrompts/p').update({ title: 'Other author' }))
   await assertFails(user('bob').doc('sharedPrompts/p').delete())
 })
@@ -63,6 +67,10 @@ test('body is private until complete publication; chunk content stays immutable'
   await assertSucceeds(guest().doc('templateBodies/body').get())
   const readBack = await Promise.all(chunks.map((_, index) => guest().doc('templateBodies/body/chunks/' + index).get()))
   assert.equal(readBack.map(snapshot => snapshot.data().text).join(''), text)
+  await assertSucceeds(db.doc('sharedPrompts/p').update({ isPublic: false, updatedAt: new Date() }))
+  await assertFails(guest().doc('templateBodies/body').get())
+  await assertFails(user('bob').doc('templateBodies/body/chunks/0').get())
+  await assertSucceeds(db.doc('templateBodies/body/chunks/0').get())
   await assertFails(body.collection('chunks').doc('0').update({ text: 'Changed' }))
   await assertFails(body.collection('chunks').doc('0').delete())
   await assertFails(body.delete())

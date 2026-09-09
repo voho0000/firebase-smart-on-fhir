@@ -20,7 +20,7 @@ const favorite = () => ({ order: -1, savedAt: new Date(), sourceUpdatedAt: new D
   authorId: 'dept', authorName: 'Cardiology', isAnonymous: false })
 const shared = (overrides = {}) => ({ title: 'Template', prompt: 'Source', types: ['summary'], category: 'summary',
   specialty: ['general'], audience: ['medical'], tags: [], authorId: 'alice', usageCount: 0,
-  createdAt: new Date(), updatedAt: new Date(), outputFormat: 'markdown', ...overrides })
+  createdAt: new Date(), updatedAt: new Date(), outputFormat: 'markdown', isPublic: true, ...overrides })
 
 test('a favorite is a private per-account copy', async () => {
   const mine = user('alice').doc('users/alice/promptFavorites/p1')

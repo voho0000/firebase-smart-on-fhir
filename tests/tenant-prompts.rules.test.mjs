@@ -67,7 +67,7 @@ test('any active member counts a use, and only by one', async () => {
 })
 
 test('public shared prompts cannot smuggle a tenantId', async () => {
-  const { tenantId: _tenant, ...publicPrompt } = prompt({ authorId: 'builder' })
+  const { tenantId: _tenant, ...publicPrompt } = prompt({ authorId: 'builder', isPublic: true })
   await assertSucceeds(user('builder').doc('sharedPrompts/s1').set(publicPrompt))
   await assertFails(user('builder').doc('sharedPrompts/s2').set(prompt({ authorId: 'builder' })))
 })

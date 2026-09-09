@@ -156,6 +156,19 @@ npm run deploy:prod
 npm run deploy
 ```
 
+### Prompt Gallery 公開狀態上線順序
+
+`sharedPrompts.isPublic` 上線時，先補齊舊資料，再部署 Rules 與 indexes，最後才發布 app。Migration 預設只列出筆數，不會寫入：
+
+```bash
+# 1. 預覽與執行舊範本補值（需要 production Admin credentials）
+npm --prefix functions run migrate:prompt-visibility
+npm --prefix functions run migrate:prompt-visibility -- --apply
+
+# 2. 部署私人範本讀取規則與公開查詢 indexes
+firebase deploy --only firestore:rules,firestore:indexes
+```
+
 ### 部署特定 Function
 
 ```bash
