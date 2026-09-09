@@ -83,10 +83,22 @@ export const proxyOpenAiCompatibleGateway = onRequest(
 // Same handlers, same secrets; only construction-time options differ.
 // ---------------------------------------------------------------------------
 
+// Ports the app's own dev servers listen on (see the app repo's
+// .claude/launch.json). Feature work runs in parallel git worktrees, each on
+// its own port, and a worktree whose port is missing here fails EVERY proxy
+// call at the CORS preflight — which reads as "the AI is broken", not as a
+// configuration gap. Listed explicitly rather than allowing any localhost
+// port: these functions hold owner-funded provider keys, so the set of local
+// callers stays enumerated. Add a port here when a new worktree needs one.
+const DEV_LOCALHOST_PORTS = [3001, 3011, 3013];
+const DEV_LOCALHOST_ORIGINS = DEV_LOCALHOST_PORTS.flatMap((port) => [
+  `http://localhost:${port}`,
+  `http://127.0.0.1:${port}`,
+]);
+
 const DEV_HANDLER_OPTIONS = {
   // localhost only — the deployed app must never point at dev-* URLs.
-  // Port 3001 = the app's `next dev -p 3001`.
-  origins: ["http://localhost:3001", "http://127.0.0.1:3001"],
+  origins: DEV_LOCALHOST_ORIGINS,
   // App Check stays log-only here for now: the app has no debug-token flow
   // on localhost yet, so enforcing would 401 every local call. Flip to true
   // to rehearse enforcement in dev before production.
