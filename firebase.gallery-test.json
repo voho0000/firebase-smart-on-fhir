@@ -1,0 +1,11 @@
+{
+  "firestore": [{ "database": "mediprisma", "rules": "firestore.rules" }],
+  "emulators": {
+    "auth": { "port": 9198 },
+    "firestore": { "port": 8188 },
+    "hub": { "port": 4488 },
+    "logging": { "port": 4588 },
+    "ui": { "enabled": false },
+    "singleProjectMode": false
+  }
+}
