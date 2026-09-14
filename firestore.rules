@@ -129,11 +129,15 @@ service cloud.firestore {
     function validTemplateVersionUpdate() {
       let materialChanged = request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(['prompt', 'body', 'outputFormat', 'languagePolicy']);
-      // Rollout bridge: an already-open old client may keep editing a legacy
-      // document until the V1 backfill runs. Version-aware writes are strict.
+      // Transitional rollout bridge. Firestore Rules cannot identify whether
+      // an update came from the old or version-aware app, so a versioned record
+      // temporarily accepts the same version for old-client edits as well as
+      // an exact +1 for a material version-aware edit. Removal, downgrade and
+      // jumps remain forbidden. Tighten this after old app sessions expire.
       return (!resource.data.keys().hasAny(['version']) && !request.resource.data.keys().hasAny(['version']))
-        || request.resource.data.get('version', 1)
-          == resource.data.get('version', 1) + (materialChanged ? 1 : 0);
+        || (request.resource.data.keys().hasAny(['version'])
+          && (request.resource.data.version == resource.data.get('version', 1)
+            || (materialChanged && request.resource.data.version == resource.data.get('version', 1) + 1)));
     }
 
     function validTag(tags, index) {

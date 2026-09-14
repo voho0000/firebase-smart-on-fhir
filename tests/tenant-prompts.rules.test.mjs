@@ -66,14 +66,16 @@ test('any active member counts a use, and only by one', async () => {
   await assertFails(user('nephro').doc('tenantPrompts/p1').update({ usageCount: 2 }))
 })
 
-test('department content revisions increment exactly once and metadata edits do not', async () => {
+test('department version-aware edits increment material changes while metadata stays stable', async () => {
   const ref = user('builder').doc('tenantPrompts/versioned')
   await assertSucceeds(ref.set(prompt({ version: 1 })))
   await assertSucceeds(ref.update({ category: 'safety', version: 1, updatedAt: new Date() }))
-  await assertFails(ref.update({ prompt: 'Changed without a bump', updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ prompt: 'Old client material edit', updatedAt: new Date() }))
   await assertSucceeds(ref.update({ prompt: 'Changed', version: 2, updatedAt: new Date() }))
-  await assertFails(ref.update({ languagePolicy: 'follow-template', version: 2, updatedAt: new Date() }))
-  await assertSucceeds(ref.update({ languagePolicy: 'follow-template', version: 3, updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ languagePolicy: 'follow-template', version: 2, updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ languagePolicy: 'interface-language', version: 3, updatedAt: new Date() }))
+  await assertFails(ref.update({ prompt: 'Jump', version: 5, updatedAt: new Date() }))
+  await assertFails(ref.set(prompt({ prompt: 'Remove version' })))
 })
 
 test('legacy department templates keep working through the rollout bridge', async () => {
@@ -81,7 +83,8 @@ test('legacy department templates keep working through the rollout bridge', asyn
   await assertSucceeds(ref.set(prompt()))
   await assertSucceeds(ref.update({ prompt: 'Old client edit', updatedAt: new Date() }))
   await assertSucceeds(ref.update({ prompt: 'Version-aware edit', version: 2, updatedAt: new Date() }))
-  await assertFails(ref.update({ prompt: 'Old client after backfill', updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ prompt: 'Old client after versioning', updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ category: 'safety', updatedAt: new Date() }))
 })
 
 test('public shared prompts cannot smuggle a tenantId', async () => {
