@@ -42,6 +42,25 @@ test('author can edit content but cannot replace ownership, createdAt, or usageC
   await assertFails(user('bob').doc('sharedPrompts/p').delete())
 })
 
+test('content changes require the next version while metadata changes keep it stable', async () => {
+  const ref = user().doc('sharedPrompts/versioned')
+  await assertSucceeds(ref.set(data({ version: 1 })))
+  await assertSucceeds(ref.update({ tags: ['reviewed'], version: 1, updatedAt: new Date() }))
+  await assertFails(ref.update({ prompt: 'Changed without version', updatedAt: new Date() }))
+  await assertFails(ref.update({ title: 'Metadata cannot bump', version: 2, updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ prompt: 'Changed', version: 2, updatedAt: new Date() }))
+  await assertFails(ref.update({ outputFormat: 'markdown', version: 4, updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ outputFormat: 'markdown', version: 3, updatedAt: new Date() }))
+})
+
+test('legacy documents remain editable during rollout until the V1 backfill', async () => {
+  const ref = user().doc('sharedPrompts/legacy-version')
+  await assertSucceeds(ref.set(data()))
+  await assertSucceeds(ref.update({ prompt: 'Old client edit', updatedAt: new Date() }))
+  await assertSucceeds(ref.update({ prompt: 'Version-aware edit', version: 2, updatedAt: new Date() }))
+  await assertFails(ref.update({ prompt: 'Old client after backfill', updatedAt: new Date() }))
+})
+
 test('anonymous presentation cannot include a public author name', async () => {
   await assertFails(user().doc('sharedPrompts/p').set(data({ isAnonymous: true, authorName: 'Alice' })))
   await assertSucceeds(user().doc('sharedPrompts/p').set(data({ isAnonymous: true })))
