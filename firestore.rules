@@ -92,7 +92,7 @@ service cloud.firestore {
                                 'tags', 'authorId', 'usageCount', 'createdAt', 'updatedAt'])
              && data.keys().hasOnly(['title', 'description', 'prompt', 'types', 'category', 'specialty',
                  'audience', 'tags', 'authorId', 'authorName', 'isAnonymous', 'usageCount',
-                 'createdAt', 'updatedAt', 'outputFormat', 'languagePolicy', 'body', 'exampleOutput', 'tenantId', 'isPublic'])
+                 'createdAt', 'updatedAt', 'outputFormat', 'languagePolicy', 'body', 'exampleOutput', 'tenantId', 'isPublic', 'version'])
              && (!('exampleOutput' in data) || (data.exampleOutput is string && data.exampleOutput.size() <= 20000))
              && (!('tenantId' in data) || (data.tenantId is string && data.tenantId.size() > 0 && data.tenantId.size() <= 128))
              && data.title is string && data.title.size() > 0 && data.title.size() <= 100
@@ -122,7 +122,22 @@ service cloud.firestore {
              && data.createdAt is timestamp && data.updatedAt is timestamp
              && data.get('outputFormat', 'markdown') in ['plain-text', 'markdown', 'html']
              && data.get('languagePolicy', 'interface-language') in ['interface-language', 'follow-template']
-             && data.get('isPublic', true) is bool;
+             && data.get('isPublic', true) is bool
+             && data.get('version', 1) is int && data.get('version', 1) >= 1;
+    }
+
+    function validTemplateVersionUpdate() {
+      let materialChanged = request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['prompt', 'body', 'outputFormat', 'languagePolicy']);
+      // Transitional rollout bridge. Firestore Rules cannot identify whether
+      // an update came from the old or version-aware app, so a versioned record
+      // temporarily accepts the same version for old-client edits as well as
+      // an exact +1 for a material version-aware edit. Removal, downgrade and
+      // jumps remain forbidden. Tighten this after old app sessions expire.
+      return (!resource.data.keys().hasAny(['version']) && !request.resource.data.keys().hasAny(['version']))
+        || (request.resource.data.keys().hasAny(['version'])
+          && (request.resource.data.version == resource.data.get('version', 1)
+            || (materialChanged && request.resource.data.version == resource.data.get('version', 1) + 1)));
     }
 
     function validTag(tags, index) {
@@ -148,6 +163,7 @@ service cloud.firestore {
                   || (isRealUser() && request.auth.uid == resource.data.authorId);
       allow create: if isRealUser() && request.resource.data.authorId == request.auth.uid
                     && request.resource.data.usageCount == 0
+                    && request.resource.data.get('version', 1) == 1
                     && request.resource.data.keys().hasAll(['isPublic'])
                     && !request.resource.data.keys().hasAny(['tenantId'])
                     && validSharedPrompt(request.resource.data)
@@ -156,7 +172,8 @@ service cloud.firestore {
       allow update: if isRealUser() && request.auth.uid == resource.data.authorId
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                       'title', 'description', 'prompt', 'types', 'category', 'specialty', 'audience',
-                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'body', 'updatedAt', 'exampleOutput', 'isPublic'])
+                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'body', 'updatedAt', 'exampleOutput', 'isPublic', 'version'])
+                    && validTemplateVersionUpdate()
                     && validSharedPrompt(request.resource.data)
                     && validBodyReference(request.resource.data, promptId);
       // This is the only route for a count change, including for the author.
@@ -186,6 +203,7 @@ service cloud.firestore {
       allow create: if isRealUser()
                     && request.resource.data.authorId == request.auth.uid
                     && request.resource.data.usageCount == 0
+                    && request.resource.data.get('version', 1) == 1
                     && request.resource.data.keys().hasAll(['tenantId'])
                     && !request.resource.data.keys().hasAny(['body'])
                     && validSharedPrompt(request.resource.data)
@@ -194,7 +212,8 @@ service cloud.firestore {
       allow update: if isRealUser() && tenantPublisher(resource.data.tenantId)
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                       'title', 'description', 'prompt', 'types', 'category', 'specialty', 'audience',
-                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'updatedAt', 'exampleOutput'])
+                      'tags', 'authorName', 'isAnonymous', 'outputFormat', 'languagePolicy', 'updatedAt', 'exampleOutput', 'version'])
+                    && validTemplateVersionUpdate()
                     && !request.resource.data.keys().hasAny(['body'])
                     && validSharedPrompt(request.resource.data);
       allow update: if isRealUser() && activeTenantMember(resource.data.tenantId)
