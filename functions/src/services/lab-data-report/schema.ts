@@ -36,6 +36,12 @@ const DATA_SOURCES = [
   "medcloud", "nhi", "smart", "demo", "import", "unknown",
 ] as const;
 const SITES = ["vghtpe", "unknown"] as const;
+// Every observation-category code but laboratory (app:
+// features/lab-data-report/utils/laboratory-scope.ts).
+const NON_LAB_CATEGORY_CODES = new Set([
+  "social-history", "vital-signs", "imaging", "survey", "exam", "therapy",
+  "activity", "procedure",
+]);
 const NAME_MODES = ["standardized", "original"] as const;
 const SOURCE_TAG_NAMES = new Set([
   "source-program",
@@ -341,9 +347,17 @@ const normalizeRow = (
     .filter((coding) => Object.keys(coding).length > 0);
   out.code = codeOut;
 
-  out.category = expectArray(row.category, `${where}.category`, 8)
+  const category = expectArray(row.category, `${where}.category`, 8)
     .map((c, i) => rowString(c, `${where}.category[${i}]`, budget, 64))
     .filter((c): c is string => c !== undefined);
+  // Policy boundary (PRIVACY_POLICY §2.10): laboratory rows only. The app
+  // sends a row only when its FHIR category is laboratory and carries no
+  // other observation-category code; anything else is refused, not stored.
+  if (!category.includes("laboratory") ||
+      category.some((code) => NON_LAB_CATEGORY_CODES.has(code))) {
+    fail(`${where}.category: not laboratory`);
+  }
+  out.category = category;
   assign(out, "specimen",
     rowString(row.specimen, `${where}.specimen`, budget, 120));
   if (row.status !== undefined) {
