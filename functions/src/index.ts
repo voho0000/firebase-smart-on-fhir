@@ -13,6 +13,7 @@ import {handleOpenAiCompatibleGateway} from
   "./services/openai-compatible-gateway/handler";
 import {parseList} from "./utils/parser";
 import {handleMembershipAdmin} from "./services/membership/handler";
+import {handleLabDataReport} from "./services/lab-data-report/handler";
 
 setGlobalOptions({
   maxInstances: 10,
@@ -72,6 +73,19 @@ export const proxyOpenAiCompatibleGateway = onRequest(
   withCorsAndErrorHandling(handleOpenAiCompatibleGateway, {
     origins: PROD_GATEWAY_ORIGINS,
     appCheckEnforce: true,
+  }),
+);
+
+// Clinician-initiated lab-data problem reports (de-identified laboratory
+// rows only; deleted once handled, 90 days at most). Writes
+// clinical-derived data, so unlike the feedback mail it is locked to the
+// app's own production origins. Only the mail key is bound (for the
+// metadata-only "new report" notice); no AI provider secret. App Check
+// follows APPCHECK_ENFORCE like the other production functions.
+export const submitLabDataReport = onRequest(
+  {timeoutSeconds: 60, memory: "512MiB", secrets: ["RESEND_API_KEY"]},
+  withCorsAndErrorHandling(handleLabDataReport, {
+    origins: PROD_GATEWAY_ORIGINS,
   }),
 );
 
@@ -141,6 +155,15 @@ export const dev = {
   sendFeedback: onRequest(
     {timeoutSeconds: 60, memory: "512MiB", maxInstances: 2},
     withCorsAndErrorHandling(handleFeedback, DEV_HANDLER_OPTIONS),
+  ),
+  submitLabDataReport: onRequest(
+    {
+      timeoutSeconds: 60,
+      memory: "512MiB",
+      maxInstances: 2,
+      secrets: ["RESEND_API_KEY"],
+    },
+    withCorsAndErrorHandling(handleLabDataReport, DEV_HANDLER_OPTIONS),
   ),
   proxyOpenAiCompatibleGateway: onRequest(
     {...DEV_PROXY_RUNTIME, timeoutSeconds: 540, secrets: []},

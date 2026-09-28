@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "problemType": "duplicate",
+  "description": "K 同一天出現兩次 4.41",
+  "includesValues": true,
+  "scope": {
+    "flaggedCategories": [
+      "chem"
+    ],
+    "categories": [
+      {
+        "categoryId": "chem",
+        "rows": 2
+      },
+      {
+        "categoryId": "urine",
+        "rows": 3
+      }
+    ]
+  },
+  "context": {
+    "appVersion": "9.9.9",
+    "dataSource": "medcloud",
+    "site": "unknown",
+    "language": "zh-TW",
+    "nameMode": "standardized"
+  },
+  "rows": [
+    {
+      "ref": 1,
+      "day": 29,
+      "sourceTime": {
+        "dayDelta": 0,
+        "time": "11:46:00"
+      },
+      "performer": [
+        "測試醫院;0936050029"
+      ],
+      "code": {
+        "text": "K",
+        "codings": [
+          {
+            "system": "http://loinc.org",
+            "code": "2823-3",
+            "display": "Potassium"
+          }
+        ]
+      },
+      "category": [
+        "laboratory"
+      ],
+      "specimen": "Blood",
+      "status": "final",
+      "unit": "mmol/L",
+      "value": {
+        "kind": "quantity",
+        "value": 4.41,
+        "magnitude": 0,
+        "decimals": 2
+      },
+      "interpretation": [
+        "N"
+      ],
+      "referenceRange": [
+        {
+          "text": "3.5~5.1"
+        }
+      ],
+      "sourceExtensions": [
+        {
+          "name": "medcloud-source-data-mark",
+          "value": "健保月檔;"
+        },
+        {
+          "name": "medcloud-source-assay-category",
+          "value": "生化學檢查"
+        },
+        {
+          "name": "medcloud-historical-lab-source",
+          "value": "imue0060/imue0060s03/get-data"
+        },
+        {
+          "name": "medcloud-lab-source-copy",
+          "value": "2"
+        }
+      ],
+      "sourceTags": [
+        "adapter-version:0.12.13",
+        "source-reconciliation:merged-daily-monthly-lab-copies"
+      ],
+      "app": {
+        "categoryId": "chem",
+        "decidedBy": "loinc",
+        "testKey": "K",
+        "column": "K"
+      },
+      "sameValueGroup": 1
+    },
+    {
+      "ref": 2,
+      "day": 29,
+      "sourceTime": {
+        "dayDelta": 0,
+        "time": "11:46:23"
+      },
+      "performer": [
+        "測試醫院;0936050029"
+      ],
+      "code": {
+        "text": "K",
+        "codings": [
+          {
+            "system": "http://loinc.org",
+            "code": "2823-3",
+            "display": "Potassium"
+          }
+        ]
+      },
+      "category": [
+        "laboratory"
+      ],
+      "specimen": "Blood",
+      "status": "final",
+      "unit": "mmol/L",
+      "value": {
+        "kind": "quantity",
+        "value": 4.41,
+        "magnitude": 0,
+        "decimals": 2
+      },
+      "interpretation": [
+        "N"
+      ],
+      "referenceRange": [
+        {
+          "text": "3.5~5.1"
+        }
+      ],
+      "sourceExtensions": [
+        {
+          "name": "medcloud-source-data-mark",
+          "value": "健保日檔;"
+        },
+        {
+          "name": "medcloud-source-assay-category",
+          "value": "生化學檢查"
+        },
+        {
+          "name": "medcloud-historical-lab-source",
+          "value": "imue0060/imue0060s03/get-data"
+        },
+        {
+          "name": "medcloud-lab-source-copy",
+          "value": "2"
+        }
+      ],
+      "sourceTags": [
+        "adapter-version:0.12.13",
+        "source-reconciliation:merged-daily-monthly-lab-copies"
+      ],
+      "app": {
+        "categoryId": "chem",
+        "decidedBy": "loinc",
+        "testKey": "K",
+        "column": "K"
+      },
+      "sameValueGroup": 1
+    },
+    {
+      "ref": 3,
+      "day": 28,
+      "timeOfDay": "09:30:00",
+      "performer": [
+        "測試醫院;0936050029"
+      ],
+      "code": {
+        "text": "血色素檢查",
+        "codings": [
+          {
+            "system": "http://loinc.org",
+            "code": "718-7",
+            "display": "Hemoglobin [Mass/volume] in Blood"
+          },
+          {
+            "system": "https://twcore.mohw.gov.tw/ig/twcore/CodeSystem/medical-service-payment-tw",
+            "code": "08003C",
+            "display": "血色素檢查(含尿液)"
+          }
+        ]
+      },
+      "category": [
+        "laboratory"
+      ],
+      "specimen": "Urine",
+      "status": "final",
+      "unit": "g/dL",
+      "value": {
+        "kind": "quantity",
+        "value": 13.2,
+        "magnitude": 1,
+        "decimals": 1
+      },
+      "interpretation": [],
+      "referenceRange": [],
+      "sourceExtensions": [],
+      "sourceTags": [],
+      "app": {
+        "categoryId": "urine",
+        "decidedBy": "specimen-urine",
+        "testKey": "HB",
+        "column": "Hb"
+      }
+    },
+    {
+      "ref": 4,
+      "day": 19,
+      "timeOfDay": "08:05:00",
+      "performer": [
+        "測試醫院;0936050029"
+      ],
+      "code": {
+        "text": "Urine Protein",
+        "codings": []
+      },
+      "category": [
+        "laboratory"
+      ],
+      "specimen": "Urine",
+      "status": "final",
+      "value": {
+        "kind": "coded",
+        "code": "T",
+        "text": "Trace"
+      },
+      "interpretation": [],
+      "referenceRange": [],
+      "sourceExtensions": [],
+      "sourceTags": [],
+      "app": {
+        "categoryId": "urine",
+        "decidedBy": "specimen-urine",
+        "testKey": "PROT",
+        "column": "PROT"
+      }
+    },
+    {
+      "ref": 5,
+      "day": 0,
+      "performer": [
+        "測試醫院;0936050029"
+      ],
+      "code": {
+        "text": "血色素檢查",
+        "codings": [
+          {
+            "system": "http://loinc.org",
+            "code": "718-7",
+            "display": "Hemoglobin [Mass/volume] in Blood"
+          },
+          {
+            "system": "https://twcore.mohw.gov.tw/ig/twcore/CodeSystem/medical-service-payment-tw",
+            "code": "08003C",
+            "display": "血色素檢查(含尿液)"
+          }
+        ]
+      },
+      "category": [
+        "laboratory"
+      ],
+      "specimen": "Urine",
+      "status": "final",
+      "unit": "g/dL",
+      "value": {
+        "kind": "quantity",
+        "value": 12.9,
+        "magnitude": 1,
+        "decimals": 1
+      },
+      "interpretation": [],
+      "referenceRange": [],
+      "sourceExtensions": [],
+      "sourceTags": [],
+      "app": {
+        "categoryId": "urine",
+        "decidedBy": "specimen-urine",
+        "testKey": "HB",
+        "column": "Hb"
+      }
+    }
+  ],
+  "truncatedRows": 0,
+  "excludedNonLabRows": 1,
+  "droppedStrings": 0
+}

@@ -1,0 +1,70 @@
+// Shared vectors for the lab-data report identifier scan — a copy of the
+// app's __tests__/features/lab-data-report/identifier-scan-vectors.ts in
+// medical-note-smart-on-fhir. Keep the two identical.
+export const ROW_VECTORS: ReadonlyArray<readonly [string, string | null]> = [
+  // identifiers
+  ['A123456789', 'national-id'],
+  ['身分證A123456789', 'national-id'],
+  ['Ａ１２３４５６７８９', 'national-id'],
+  ['AB12345678', 'national-id'],
+  ['F203XXX511', 'masked-id'],
+  ['A10040XXXX', 'masked-id'],
+  ['病人 A123****89', 'masked-id'],
+  ['doctor@example.com', 'email'],
+  ['0912-345-678', 'phone'],
+  ['+886 912 345 678', 'phone'],
+  ['2026-07-04', 'full-date'],
+  ['2026-07-04T10:15:00+08:00', 'full-date'],
+  ['2026/7/4', 'full-date'],
+  ['2026年7月4日', 'full-date'],
+  ['115/07/04', 'full-date'],
+  ['95/3/12', 'full-date'],
+  ['115年7月4日', 'full-date'],
+  // legitimate lab strings that must pass
+  ['WBC', null],
+  ['白血球計數', null],
+  ['臺北榮民總醫院;0601160016', null],
+  ['臺中慈濟醫院;0936050029', null],
+  ['0936050029', null],
+  ['https://twcore.mohw.gov.tw/ig/twcore/CodeSystem/medical-service-payment-tw', null],
+  ['08011C', null],
+  ['2093-3', null],
+  ['1975-2', null],
+  ['3.5~5.0', null],
+  ['100.5-10', null],
+  ['4.41 / 4.41', null],
+  ['x10^3/uL', null],
+  ['10^3/μL', null],
+  ['1+(>25/LPF)', null],
+  ['imue0060/imue0060s03/get-data', null],
+  ['source-reconciliation:merged-daily-monthly-lab-copies', null],
+  ['adapter-version:0.12.13', null],
+  ['健保日檔;', null],
+  ['C3', null],
+  ['Anti-ENA', null],
+]
+
+export const DESCRIPTION_VECTORS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['C3 和 Anti-ENA 出現在尿液欄位', []],
+  ['WBC 在血液和尿液都有', []],
+  ['病歷號 12345678 的病人', ['long-number']],
+  ['請聯絡 0912345678', ['phone', 'long-number']],
+  ['2026/09/27 那天的 CBC', ['full-date']],
+  ['身分證 A123456789', ['national-id', 'long-number']],
+  ['值 4.41 / 4.41 重複', []],
+]
+
+export const RESULT_TEXT_VECTORS: ReadonlyArray<readonly [string, boolean]> = [
+  ['Negative', true],
+  ['1+(>25/LPF)', true],
+  ['淡黃色', true],
+  ['陽性(+)', true],
+  ['Klebsiella pneumoniae', true],
+  ['No growth after 2 days', true],
+  ['Reactive (12.3)', true],
+  ['未見細菌生長(培養48小時)', true],
+  ['大量白血球與細菌建議臨床追蹤並重新採檢', false],
+  ['顯微鏡下可見大量白血球與細菌，建議臨床追蹤', false],
+  ['大量白血球與細菌建議臨床追蹤並重新採檢以排除污染', false],
+  ['Few bacteria seen. Please recollect.', false],
+]
