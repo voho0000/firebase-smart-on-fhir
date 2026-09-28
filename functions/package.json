@@ -11,7 +11,7 @@
     "migrate:prompt-visibility": "node scripts/backfill-shared-prompt-visibility.mjs",
     "deploy": "firebase deploy --only functions",
     "deploy:dev": "firebase deploy --only functions:dev",
-    "deploy:prod": "firebase deploy --only functions:proxyWhisper,functions:proxyGeminiChat,functions:proxyChatCompletion,functions:proxyPerplexitySearch,functions:proxyClaudeChat,functions:proxyOpenAiCompatibleGateway,functions:sendFeedback",
+    "deploy:prod": "firebase deploy --only functions:proxyWhisper,functions:proxyGeminiChat,functions:proxyChatCompletion,functions:proxyPerplexitySearch,functions:proxyClaudeChat,functions:proxyOpenAiCompatibleGateway,functions:sendFeedback,functions:submitLabDataReport",
     "logs": "firebase functions:log"
   },
   "engines": {

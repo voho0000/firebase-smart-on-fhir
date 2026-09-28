@@ -319,6 +319,54 @@ test('feedbackRateLimits: client cannot read or write (admin-only bucket)', asyn
   await assertFails(setDoc(doc(real('alice'), 'feedbackRateLimits/x'), { n: 1 }))
 })
 
+// ---------------------------------------------------------- labDataReports
+// Written only by the submitLabDataReport Function (Admin SDK). The reporter
+// never reads them back; only the developer admin account reads and deletes
+// them (the /lab-reports viewer), and nobody can create or edit one.
+test('labDataReports: only the developer admin reads and deletes; nobody writes', async () => {
+  await seed(async (db) => {
+    await setDoc(doc(db, 'labDataReports/LDR-1'), { reporterUid: 'alice', rowCount: 1, description: 'x' })
+    await setDoc(doc(db, 'labDataReports/LDR-1/labDataReportRows/000'), { chunk: 0, rows: [] })
+  })
+  for (const db of [real('alice'), anon('alice'), real('bob'), unauth()]) {
+    await assertFails(getDoc(doc(db, 'labDataReports/LDR-1')))
+    await assertFails(getDocs(collection(db, 'labDataReports')))
+    await assertFails(getDoc(doc(db, 'labDataReports/LDR-1/labDataReportRows/000')))
+    await assertFails(deleteDoc(doc(db, 'labDataReports/LDR-1')))
+  }
+  const admin = featureAdmin()
+  await assertSucceeds(getDocs(query(collection(admin, 'labDataReports'))))
+  await assertSucceeds(getDoc(doc(admin, 'labDataReports/LDR-1')))
+  await assertSucceeds(getDocs(collection(admin, 'labDataReports/LDR-1/labDataReportRows')))
+  // Even the admin cannot forge or edit a report.
+  await assertFails(setDoc(doc(admin, 'labDataReports/LDR-2'), { reporterUid: 'x', rowCount: 0 }))
+  await assertFails(updateDoc(doc(admin, 'labDataReports/LDR-1'), { description: 'y' }))
+  await assertFails(setDoc(doc(admin, 'labDataReports/LDR-1/labDataReportRows/001'), { chunk: 1, rows: [] }))
+  // Handled → deleted.
+  await assertSucceeds(deleteDoc(doc(admin, 'labDataReports/LDR-1/labDataReportRows/000')))
+  await assertSucceeds(deleteDoc(doc(admin, 'labDataReports/LDR-1')))
+})
+
+test('labDataReports: an unverified account using the admin email is not the admin', async () => {
+  await seed((db) => setDoc(doc(db, 'labDataReports/LDR-1'), { reporterUid: 'alice' }))
+  const impostor = testEnv.authenticatedContext('impostor', {
+    email: 'voho0000@gmail.com',
+    email_verified: false,
+    firebase: { sign_in_provider: 'password' },
+  }).firestore()
+  await assertFails(getDoc(doc(impostor, 'labDataReports/LDR-1')))
+})
+
+test('labDataReportRateLimits: client cannot read or write (admin-only bucket)', async () => {
+  await assertFails(getDoc(doc(real('alice'), 'labDataReportRateLimits/x')))
+  await assertFails(setDoc(doc(anon('alice'), 'labDataReportRateLimits/x'), { count: 0 }))
+})
+
+test('labDataReportKeys: client cannot read or write (resend de-duplication)', async () => {
+  await assertFails(getDoc(doc(real('alice'), 'labDataReportKeys/x')))
+  await assertFails(setDoc(doc(anon('alice'), 'labDataReportKeys/x'), { reportId: 'LDR-1' }))
+})
+
 // ------------------------------------------------------ tenant memberships
 test('membership: real user can read only their own server-created membership', async () => {
   await seed((db) => setDoc(doc(db, 'users/alice/memberships/hospital-a'), {

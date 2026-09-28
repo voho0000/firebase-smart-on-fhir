@@ -15,6 +15,11 @@ service cloud.firestore {
              && request.auth.token.email == 'voho0000@gmail.com';
     }
 
+    // 檢驗資料問題回報的管理帳號＝功能許願池的管理帳號（驗證過的開發者信箱）。
+    function isLabDataReportAdmin() {
+      return isFeatureRequestAdmin();
+    }
+
     function ownsFeatureRequest(requestId) {
       return isRealUser()
              && exists(/databases/$(database)/documents/featureRequestOwners/$(requestId))
@@ -413,6 +418,32 @@ service cloud.firestore {
     // 由 feedback Function（admin SDK）寫入的防濫用限流桶。admin SDK 會略過
     // 規則，但 client 不該讀寫——明確拒絕以防竄改。
     match /feedbackRateLimits/{doc} {
+      allow read, write: if false;
+    }
+
+    // 醫師主動送出的「檢驗資料問題回報」（去識別、只含檢驗列）。
+    // 只由 submitLabDataReport Function 以 Admin SDK 寫入。回報者本人看不到
+    // （送出後只拿到回報編號）；只有開發團隊的管理帳號能在回報檢視頁
+    // （app /lab-reports）讀取，並在問題處理完時刪除。expireAt（建立後 90 天）
+    // 的 TTL 只是沒處理到時的上限。
+    match /labDataReports/{reportId} {
+      allow read, delete: if isLabDataReportAdmin();
+      allow create, update: if false;
+
+      // 資料列分段存放（每段 250 列），權限同上。
+      match /labDataReportRows/{chunkId} {
+        allow read, delete: if isLabDataReportAdmin();
+        allow create, update: if false;
+      }
+    }
+
+    // 上面那個 Function 的限流桶（key 是加鹽雜湊，不存 uid／IP）。
+    match /labDataReportRateLimits/{doc} {
+      allow read, write: if false;
+    }
+
+    // 重送去重：同一回報者、同一內容指紋只存一份（1 天 TTL）。
+    match /labDataReportKeys/{doc} {
       allow read, write: if false;
     }
 
