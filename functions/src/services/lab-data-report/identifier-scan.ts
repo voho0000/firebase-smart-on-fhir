@@ -17,7 +17,15 @@ export type IdentifierKind =
 
 // Text is NFKC-normalised first, so full-width letters and digits are caught
 // by the same ASCII patterns.
-const ROW_PATTERNS: ReadonlyArray<readonly [IdentifierKind, RegExp]> = [
+//
+// Source strings and the reporter's note get the same patterns. There is no
+// exception for the 10-digit 醫事機構代碼: it cannot be told apart from a
+// chart or mobile number. The app takes it out of performer — the one field
+// known to carry it — before it scans; anything left here is dropped.
+const MONTH = "(?:0?[1-9]|1[0-2])";
+const DAY = "(?:0?[1-9]|[12]\\d|3[01])";
+
+const PATTERNS: ReadonlyArray<readonly [IdentifierKind, RegExp]> = [
   // 身分證／新式居留證: letter + 1/2/8/9 + 8 digits.
   ["national-id", /(?:^|[^A-Za-z0-9])[A-Za-z][1289]\d{8}(?!\d)/],
   // 舊式居留證: two letters + 8 digits.
@@ -25,40 +33,46 @@ const ROW_PATTERNS: ReadonlyArray<readonly [IdentifierKind, RegExp]> = [
   // Masked forms the bridges print, e.g. F203XXX511, A10040XXXX.
   ["masked-id", /(?:^|[^A-Za-z0-9])[A-Za-z]\d{2,6}[Xx*]{3,6}\d{0,4}(?!\d)/],
   ["email", /[\w.+-]+@[\w-]+\.[\w.-]+/],
-  // Taiwan mobile written as a phone number. A bare 10-digit run is not
-  // matched: performer strings carry 10-digit 醫事機構代碼.
+  // Taiwan mobile: 0912-345-678, 0912345678, +886 912 345 678.
   [
     "phone",
     // eslint-disable-next-line max-len
-    /(?:^|\D)(?:\+?886[-\s]?9\d{2}[-\s]?\d{3}[-\s]?\d{3}|09\d{2}[-\s]\d{3}[-\s]?\d{3})(?!\d)/,
+    /(?:^|\D)(?:\+?886[-\s]?9\d{2}[-\s]?\d{3}[-\s]?\d{3}|09\d{2}[-\s]?\d{3}[-\s]?\d{3})(?!\d)/,
   ],
   // Western dates, including ISO timestamps and 年/月.
   [
     "full-date",
-    /(?:^|\D)(?:19|20)\d{2}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,2}(?!\d)/,
+    new RegExp(
+      // eslint-disable-next-line max-len
+      `(?:^|\\D)(?:19|20)\\d{2}\\s*[-/.年]\\s*${MONTH}\\s*[-/.月]\\s*${DAY}(?!\\d)`,
+    ),
   ],
-  // ROC (民國 80–119) dates, only with / or 年.
+  // ROC, any year 民國 0–119, zero-padded or not: 65/03/12, 079-3-12,
+  // 65年3月12日. Month and day must be valid ("1/80/160" is a titre).
   [
     "full-date",
-    /(?:^|\D)(?:[89]\d|1[01]\d)\s*[/年]\s*\d{1,2}\s*[/月]\s*\d{1,2}(?!\d)/,
+    new RegExp(
+      // eslint-disable-next-line max-len
+      `(?:^|\\D)(?:0?\\d{1,2}|1[01]\\d)\\s*[-/年]\\s*${MONTH}\\s*[-/月]\\s*${DAY}(?!\\d)`,
+    ),
   ],
-];
-
-// Reporter-typed text only: a bare mobile number or any 7+ digit run (chart
-// number). Source rows legitimately carry 10-digit institution codes.
-const DESCRIPTION_PATTERNS: ReadonlyArray<readonly [IdentifierKind, RegExp]> =
+  // ROC with dots only in the two-digit form (65.03.12, 079.03.12), so a
+  // version ("0.12.13") or a decimal range is not a date.
   [
-    ...ROW_PATTERNS,
-    ["phone", /(?:^|\D)09\d{8}(?!\d)/],
-    ["long-number", /\d{7,}/],
-  ];
+    "full-date",
+    // eslint-disable-next-line max-len
+    /(?:^|[^\d.])(?:0?\d{2}|1[01]\d)\.(?:0[1-9]|1[0-2])\.(?:0[1-9]|[12]\d|3[01])(?![\d.])/,
+  ],
+  // Any 7+ digit run: a chart number, an ID without its letter, a phone.
+  ["long-number", /\d{7,}/],
+];
 
 export const findRowIdentifier = (
   text: string | undefined | null,
 ): IdentifierKind | null => {
   if (!text) return null;
   const normalized = String(text).normalize("NFKC");
-  for (const [kind, pattern] of ROW_PATTERNS) {
+  for (const [kind, pattern] of PATTERNS) {
     if (pattern.test(normalized)) return kind;
   }
   return null;
@@ -70,7 +84,7 @@ export const findDescriptionIdentifiers = (
   if (!text) return [];
   const normalized = String(text).normalize("NFKC");
   const kinds = new Set<IdentifierKind>();
-  for (const [kind, pattern] of DESCRIPTION_PATTERNS) {
+  for (const [kind, pattern] of PATTERNS) {
     if (pattern.test(normalized)) kinds.add(kind);
   }
   return [...kinds];

@@ -209,6 +209,40 @@ describe("normalizeLabDataReport", () => {
     expect(row.value).toEqual({kind: "string", length: 19});
     expect(serverDroppedStrings).toBe(3);
   });
+
+  it("drops chart numbers, bare mobiles and old ROC birth dates in rows", () => {
+    const body = payload();
+    const texts = ["病歷號 12345678", "0912345678", "生日 65/3/12", "出生日期 79年3月12日"];
+    body.rows[0].referenceRange = texts.slice(0, 2).map((text) => ({text}));
+    body.rows[1].referenceRange = texts.slice(2).map((text) => ({text}));
+    body.rows[2].performer = ["測試醫院;0601160016"];
+    const {report, serverDroppedStrings} = normalizeLabDataReport(body);
+    const rows = report.rows as Array<Record<string, unknown>>;
+    expect(rows[0].referenceRange).toEqual([]);
+    expect(rows[1].referenceRange).toEqual([]);
+    expect(rows[2].performer).toEqual([]);
+    expect(serverDroppedStrings).toBe(5);
+  });
+
+  it.each([
+    [["survey"]],
+    [["vital-signs"]],
+    [["laboratory", "survey"]],
+    [["laboratory", "exam"]],
+    [[]],
+  ])("refuses a row whose category is %j", (category) => {
+    const body = payload();
+    body.rows[3].category = category;
+    expect(reject(body)).toBe("rows[3].category: not laboratory");
+  });
+
+  it("accepts laboratory next to a local category code", () => {
+    const body = payload();
+    body.rows[0].category = ["laboratory", "chemistry"];
+    const {report} = normalizeLabDataReport(body);
+    const rows = report.rows as Array<{category: string[]}>;
+    expect(rows[0].category).toEqual(["laboratory", "chemistry"]);
+  });
 });
 
 const mockRes = () => {
