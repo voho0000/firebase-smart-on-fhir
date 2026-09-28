@@ -26,6 +26,7 @@ const PANEL_LABELS: Readonly<Record<string, string>> = {
   serology: "病毒抗原",
   microbio: "微生物",
   other: "其他",
+  unknown: "未知分類",
 };
 
 const PROBLEM_LABELS: Readonly<Record<string, string>> = {
@@ -59,7 +60,9 @@ export interface LabReportNotice {
   hasDescription: boolean;
 }
 
-const panel = (id: string): string => PANEL_LABELS[id] ?? id;
+// Ids are whitelisted by the schema; a label lookup miss still never echoes
+// the id itself.
+const panel = (id: string): string => PANEL_LABELS[id] ?? PANEL_LABELS.unknown;
 
 const escapeHtml = (text: string): string => text
   .replace(/&/g, "&amp;")

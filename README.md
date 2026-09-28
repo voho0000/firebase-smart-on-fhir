@@ -199,7 +199,9 @@ App 端「回報檢驗資料問題」（medical-note-smart-on-fhir `features/lab
 - 限流：加鹽雜湊 uid 每小時 10 次、雜湊 IP 每小時 30 次（`labDataReportRateLimits`，1 小時 TTL）。
 - 重送去重：app 附 `submissionKey`（整份 payload 的 SHA-256）；`labDataReportKeys/{hash(uid:key)}` 記 `reportId`（1 天 TTL），同 uid 同內容再送直接回原編號。client timeout 60 秒＝Function timeout。
 - 寫入 `labDataReports/{LDR-YYYYMMDD-XXXXXXXX}`：報告內容＋`reporterUid`、`reporterIsAnonymous`、`rowCount`、`serverDroppedStrings`、`createdAt`、`expireAt`（+90 天，只是上限）。規則：只有開發者管理帳號（`isLabDataReportAdmin()`＝`isFeatureRequestAdmin()`，驗證過的 voho0000@gmail.com）可讀、可刪（報告與 row chunks）；任何 client 都不能新增或修改。
-- 資料列每 250 列存成 `labDataReports/{id}/labDataReportRows/{000…}`（單一文件上限 1 MiB），與報告同一個 batch 原子寫入；報告文件本身不含 `rows`，有 `rowCount`、`rowChunks`。
+- 資料列依 Firestore 計算的大小分段（每段 ≤ 800 KB、最多 250 列；單一文件上限 1 MiB，一列最大約 12 KB），存成 `labDataReports/{id}/labDataReportRows/{000…}`，與報告同一個 batch 原子寫入；報告文件本身不含 `rows`，有 `rowCount`、`rowChunks`。
+- 分類 id 只接受 app 的 13 個固定值（`PANEL_IDS`，對應 app `LAB_CATEGORIES`）；其他值一律存成 `unknown` 並記在 `serverUnknownPanels`，不讓自由文字進資料庫或通知信。app 新增分類時要同步更新這份清單。
+- 拒絕原因只寫 schema 路徑（例如 `rows[0]: unexpected field`），不回帶送來的欄位名稱——那是對方可控的文字，會進日誌也會回傳給 client。
 - **TTL policy** 設在 `firestore.indexes.json` 的 `fieldOverrides`（`labDataReports` 與 `labDataReportRows` 的 `expireAt`，並把 chunk 的 `rows` 排除索引）；部署 `firebase deploy --only firestore`（named database 時 `firestore:rules` 單獨指定無效）。Firestore 通常在到期後 24 小時內刪除。
 - **新回報通知信**：寫入成功後經 Resend 寄給 voho0000@gmail.com（`RESEND_API_KEY`，與 sendFeedback 同一把），只含回報編號、勾選分類、問題類型、各分類列數、資料來源與檢視連結；不含說明、醫院、檢驗項目、代碼或數值（`notify.ts`，有測試鎖住）。寄信失敗不影響回報成功；重送去重時不會再寄。連結預設 `https://mediprisma.tw/app/lab-reports?id=…`（`LAB_REPORT_VIEWER_URL` 可改）。
 - **檢視頁**：app 的 `/lab-reports`（不從臨床畫面連過去）。用管理帳號登入後列出回報，每份依分類重建成累積報告格子（天 × 欄位，欄名下方是分類規則），點格子看原始欄位；可下載 JSON、按「已處理，刪除」。

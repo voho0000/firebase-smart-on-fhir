@@ -27,8 +27,64 @@ const DATABASE_ID = "mediprisma";
 export const REPORTS_COLLECTION = "labDataReports";
 // Rows live in chunk documents under the report: a whole-patient report
 // (~1 MB at 1,400 rows) would not fit Firestore's 1 MiB document limit.
+// Chunks are cut by SIZE, not a fixed row count — a row can legitimately
+// reach ~12 KB (10 codings × 3 × 200 chars …), so 250 such rows would be
+// ~3 MB and fail the whole write.
 export const ROWS_SUBCOLLECTION = "labDataReportRows";
-export const ROWS_PER_CHUNK = 250;
+export const MAX_ROWS_PER_CHUNK = 250;
+export const MAX_CHUNK_BYTES = 800 * 1024;
+
+/**
+ * Firestore's storage size of a value (the rules the 1 MiB limit is
+ * measured with): string = UTF-8 bytes + 1, number 8, boolean/null 1, map
+ * field = name bytes + 1 + value, array/map = the sum of their contents.
+ * @param {unknown} value - A JSON-like value.
+ * @return {number} Estimated bytes.
+ */
+export const firestoreSize = (value: unknown): number => {
+  if (value === null || value === undefined || typeof value === "boolean") {
+    return 1;
+  }
+  if (typeof value === "number") return 8;
+  if (typeof value === "string") return Buffer.byteLength(value) + 1;
+  if (Array.isArray(value)) {
+    return value.reduce((sum: number, item) => sum + firestoreSize(item), 0);
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).reduce(
+      (sum, [key, item]) =>
+        sum + Buffer.byteLength(key) + 1 + firestoreSize(item),
+      0,
+    );
+  }
+  return 8;
+};
+
+/**
+ * Split rows into chunks that each stay well under the document limit.
+ * @param {Array<unknown>} rows - Normalised rows.
+ * @return {Array<Array<unknown>>} Chunks, in order.
+ */
+export const chunkRows = (rows: unknown[]): unknown[][] => {
+  const chunks: unknown[][] = [];
+  let current: unknown[] = [];
+  let size = 0;
+  for (const row of rows) {
+    const bytes = firestoreSize(row);
+    if (
+      current.length > 0 &&
+      (size + bytes > MAX_CHUNK_BYTES || current.length >= MAX_ROWS_PER_CHUNK)
+    ) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(row);
+    size += bytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+};
 export const RATE_LIMIT_COLLECTION = "labDataReportRateLimits";
 // One document per (reporter, payload fingerprint): a resend after a client
 // timeout returns the first report instead of storing it twice.
@@ -183,8 +239,8 @@ export const handleLabDataReport = async (
     now.getTime() + RETENTION_DAYS * 24 * HOUR_MS,
   );
   const {rows, ...header} = normalized.report;
-  const allRows = rows as unknown[];
-  const chunkCount = Math.ceil(allRows.length / ROWS_PER_CHUNK);
+  const chunks = chunkRows(rows as unknown[]);
+  const chunkCount = chunks.length;
   const document = {
     ...header,
     reporterUid: user.uid,
@@ -192,6 +248,7 @@ export const handleLabDataReport = async (
     rowCount: normalized.rowCount,
     rowChunks: chunkCount,
     serverDroppedStrings: normalized.serverDroppedStrings,
+    serverUnknownPanels: normalized.serverUnknownPanels,
     createdAt: FieldValue.serverTimestamp(),
     // The retention ceiling. A report is deleted as soon as its problem is
     // handled (scripts/lab-data-reports.mjs resolve); TTL only catches the
@@ -211,19 +268,13 @@ export const handleLabDataReport = async (
         expireAt: Timestamp.fromMillis(now.getTime() + SUBMISSION_KEY_TTL_MS),
       });
     }
-    for (let chunk = 0; chunk < chunkCount; chunk++) {
+    chunks.forEach((chunkRowsList, chunk) => {
       batch.create(
         reportRef.collection(ROWS_SUBCOLLECTION)
           .doc(String(chunk).padStart(3, "0")),
-        {
-          chunk,
-          rows: allRows.slice(
-            chunk * ROWS_PER_CHUNK, (chunk + 1) * ROWS_PER_CHUNK,
-          ),
-          expireAt,
-        },
+        {chunk, rows: chunkRowsList, expireAt},
       );
-    }
+    });
     await batch.commit();
   };
   let reportId = createReportId(now);

@@ -86,9 +86,12 @@ const isObject = (value: unknown): value is Json =>
 const expectObject = (value: unknown, where: string): Json =>
   isObject(value) ? value : fail(`${where}: expected object`);
 
+// The reason names the schema path only, never the offending key: a key is
+// attacker-chosen text (it could carry an ID number), and the reason is both
+// logged and returned to the client.
 const onlyKeys = (value: Json, allowed: readonly string[], where: string) => {
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) fail(`${where}.${key}: unexpected field`);
+    if (!allowed.includes(key)) fail(`${where}: unexpected field`);
   }
 };
 
@@ -133,6 +136,7 @@ const optionalFinite = (value: unknown, where: string): number | undefined => {
 /** Collects the scan results while one report is normalised. */
 interface ScanBudget {
   dropped: number;
+  unknownPanels: number;
 }
 
 /**
@@ -179,16 +183,34 @@ const resultString = (
   return undefined;
 };
 
+// The app's cumulative-report panels — LAB_CATEGORIES ids in
+// medical-note-smart-on-fhir src/shared/utils/lab-categories.ts. A panel id
+// reaches the notice mail, so only these travel; anything else is stored as
+// "unknown" and counted (a panel the app adds later still reports, but no
+// free text can ride along in this field).
+export const PANEL_IDS = [
+  "cbc", "coag", "chem", "endocrine", "lipid", "glucose", "hep", "tumor",
+  "urine", "bloodgas", "serology", "microbio", "other",
+] as const;
+export const UNKNOWN_PANEL = "unknown";
+
 /**
- * A lab panel id (cbc, chem, urine …): a fixed app vocabulary.
+ * A lab panel id from the fixed app vocabulary, else "unknown" (counted).
  * @param {unknown} value - Submitted value.
  * @param {string} where - Field path for the rejection reason.
- * @return {string} The panel id.
+ * @param {ScanBudget} budget - Counters for this report.
+ * @return {string} The panel id, or "unknown".
  */
-const categoryIdOf = (value: unknown, where: string): string =>
-  typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value) ?
-    value :
-    fail(`${where}: expected a panel id`);
+const panelIdOf = (
+  value: unknown,
+  where: string,
+  budget: ScanBudget,
+): string => {
+  if (typeof value !== "string") return fail(`${where}: expected a panel id`);
+  if ((PANEL_IDS as readonly string[]).includes(value)) return value;
+  budget.unknownPanels += 1;
+  return UNKNOWN_PANEL;
+};
 
 const assign = <T extends Json>(target: T, key: string, value: unknown) => {
   if (value !== undefined) (target as Json)[key] = value;
@@ -394,7 +416,7 @@ const normalizeRow = (
   out.app = {
     categoryId: app.categoryId === null ?
       null :
-      rowString(app.categoryId, `${where}.app.categoryId`, budget, 40) ?? null,
+      panelIdOf(app.categoryId, `${where}.app.categoryId`, budget),
     decidedBy: expectEnum(app.decidedBy, DECISIONS, `${where}.app.decidedBy`),
     testKey: rowString(app.testKey, `${where}.app.testKey`, budget) ?? "",
     column: rowString(app.column, `${where}.app.column`, budget) ?? "",
@@ -406,6 +428,8 @@ export interface NormalizedLabDataReport {
   report: Json;
   rowCount: number;
   serverDroppedStrings: number;
+  /** Panel ids outside PANEL_IDS, stored as "unknown". */
+  serverUnknownPanels: number;
   /** SHA-256 of the payload, for de-duplicating a resend. Not stored. */
   submissionKey?: string;
 }
@@ -436,7 +460,7 @@ export const normalizeLabDataReport = (
   if (payload.schemaVersion !== LAB_DATA_REPORT_SCHEMA_VERSION) {
     fail("schemaVersion: unsupported");
   }
-  const budget: ScanBudget = {dropped: 0};
+  const budget: ScanBudget = {dropped: 0, unknownPanels: 0};
 
   if (typeof payload.description !== "string") {
     fail("description: expected string");
@@ -454,16 +478,16 @@ export const normalizeLabDataReport = (
 
   const scope = expectObject(payload.scope, "scope");
   onlyKeys(scope, ["flaggedCategories", "categories"], "scope");
-  const flaggedCategories = expectArray(
+  const flaggedCategories = [...new Set(expectArray(
     scope.flaggedCategories, "scope.flaggedCategories", 30,
-  ).map((id, i) => categoryIdOf(id, `scope.flaggedCategories[${i}]`));
+  ).map((id, i) => panelIdOf(id, `scope.flaggedCategories[${i}]`, budget)))];
   const categories = expectArray(scope.categories, "scope.categories", 30)
     .map((raw, i) => {
       const at = `scope.categories[${i}]`;
       const entry = expectObject(raw, at);
       onlyKeys(entry, ["categoryId", "rows"], at);
       return {
-        categoryId: categoryIdOf(entry.categoryId, `${at}.categoryId`),
+        categoryId: panelIdOf(entry.categoryId, `${at}.categoryId`, budget),
         rows: expectInteger(entry.rows, `${at}.rows`, 0, MAX_ROWS),
       };
     });
@@ -510,6 +534,7 @@ export const normalizeLabDataReport = (
     report,
     rowCount: rows.length,
     serverDroppedStrings: budget.dropped,
+    serverUnknownPanels: budget.unknownPanels,
     ...(typeof payload.submissionKey === "string" &&
       {submissionKey: payload.submissionKey}),
   };

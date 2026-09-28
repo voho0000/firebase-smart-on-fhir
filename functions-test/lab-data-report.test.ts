@@ -15,7 +15,10 @@ import {
   normalizeLabDataReport,
 } from "../functions/src/services/lab-data-report/schema";
 import {
+  chunkRows,
+  firestoreSize,
   handleLabDataReport,
+  MAX_CHUNK_BYTES,
   RATE_LIMIT_COLLECTION,
   REPORTS_COLLECTION,
   ROWS_SUBCOLLECTION,
@@ -75,6 +78,31 @@ describe("identifier scan (shared vectors)", () => {
   });
 });
 
+describe("chunkRows", () => {
+  it("cuts by Firestore size, so large rows never overflow a 1 MiB document", () => {
+    const big = {code: {text: "x".repeat(200)}, codings: Array.from({length: 10},
+      () => ({system: "s".repeat(200), code: "c".repeat(200), display: "d".repeat(200)}))};
+    const rows = Array.from({length: 300}, (_, ref) => ({...big, ref}));
+    expect(firestoreSize(rows[0])).toBeGreaterThan(6000);
+    const chunks = chunkRows(rows);
+    expect(chunks.flat()).toHaveLength(300);
+    expect(chunks.length).toBeGreaterThan(2);
+    for (const chunk of chunks) {
+      expect(firestoreSize(chunk)).toBeLessThanOrEqual(MAX_CHUNK_BYTES);
+    }
+  });
+
+  it("still caps a chunk at 250 small rows", () => {
+    const chunks = chunkRows(Array.from({length: 600}, (_, ref) => ({ref})));
+    expect(chunks.map((chunk) => chunk.length)).toEqual([250, 250, 100]);
+  });
+
+  it("measures strings in UTF-8 bytes, like Firestore", () => {
+    expect(firestoreSize("尿液")).toBe(7);
+    expect(firestoreSize({a: 1, b: [true, null]})).toBe(2 + 8 + 2 + 2);
+  });
+});
+
 describe("normalizeLabDataReport", () => {
   it("accepts the app-built payload unchanged", () => {
     const {report, rowCount, serverDroppedStrings} =
@@ -86,13 +114,13 @@ describe("normalizeLabDataReport", () => {
 
   it("rejects fields outside the contract, at any depth", () => {
     expect(reject({...payload(), patientId: "x"}))
-      .toBe("body.patientId: unexpected field");
+      .toBe("body: unexpected field");
     const nested = payload();
     nested.rows[0].id = "Observation/1";
-    expect(reject(nested)).toBe("rows[0].id: unexpected field");
+    expect(reject(nested)).toBe("rows[0]: unexpected field");
     const note = payload();
     note.rows[0].code.note = "free text";
-    expect(reject(note)).toBe("rows[0].code.note: unexpected field");
+    expect(reject(note)).toBe("rows[0].code: unexpected field");
     const dated = payload();
     dated.rows[0].sourceTags = ["nhi-visit-date:2026-01-01"];
     // An absolute date is dropped by the scan before the whitelist sees it.
@@ -122,9 +150,46 @@ describe("normalizeLabDataReport", () => {
     const many = payload();
     many.rows = Array.from({length: 3001}, () => many.rows[0]);
     expect(reject(many)).toBe("rows: more than 3000 items");
-    expect(reject({...payload(), scope: {flaggedCategories: ["../x"], categories: []}}))
+    expect(reject({...payload(), scope: {flaggedCategories: [7], categories: []}}))
       .toBe("scope.flaggedCategories[0]: expected a panel id");
     expect(reject({...payload(), rows: []})).toBe("rows: empty");
+  });
+
+  it("never echoes a submitted field name (it could carry an identifier)", () => {
+    const body: Record<string, unknown> = payload();
+    body["A123456789"] = true;
+    const reason = reject(body);
+    expect(reason).toBe("body: unexpected field");
+    expect(reason).not.toContain("A123456789");
+    const row = payload();
+    row.rows[0]["病人王小明"] = 1;
+    expect(reject(row)).toBe("rows[0]: unexpected field");
+  });
+
+  it("keeps panel ids to the app vocabulary; anything else becomes unknown", () => {
+    const body = payload();
+    body.scope.flaggedCategories = ["urine", "a123456789", "wang-xiao-ming", "urine"];
+    body.scope.categories = [{categoryId: "f203xxx511", rows: 5}];
+    body.rows[0].app.categoryId = "a123456789";
+    const {report, serverUnknownPanels} = normalizeLabDataReport(body);
+    expect(report.scope).toEqual({
+      flaggedCategories: ["urine", "unknown"],
+      categories: [{categoryId: "unknown", rows: 5}],
+    });
+    const rows = report.rows as Array<{app: {categoryId: string}}>;
+    expect(rows[0].app.categoryId).toBe("unknown");
+    expect(serverUnknownPanels).toBe(4);
+    const all = JSON.stringify(report);
+    for (const smuggled of ["a123456789", "wang-xiao-ming", "f203xxx511"]) {
+      expect(all).not.toContain(smuggled);
+    }
+    const mail = composeLabReportNotice({
+      reportId: "LDR-1", problemType: "other",
+      flaggedCategories: ["a123456789"], categories: [{categoryId: "x", rows: 1}],
+      rowCount: 1, includesValues: true, dataSource: "nhi", site: "unknown",
+      hasDescription: false,
+    }, "https://example.test");
+    expect(`${mail.text}${mail.html}`).not.toContain("a123456789");
   });
 
   it("refuses a description that carries an identifier, with the kinds", () => {
@@ -171,6 +236,10 @@ const mockRes = () => {
   return res;
 };
 
+// A fresh IP per run: the emulator keeps rate-limit buckets across runs, and
+// a shared test IP would trip the 30/hour limit on the third run in an hour.
+const RUN_IP = `198.18.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+
 const mockReq = (body: unknown, overrides: Record<string, unknown> = {}) => {
   const json = JSON.stringify(body);
   return {
@@ -179,7 +248,7 @@ const mockReq = (body: unknown, overrides: Record<string, unknown> = {}) => {
     rawBody: Buffer.from(json),
     is: (type: string) => type === "application/json",
     header: (name: string) =>
-      name.toLowerCase() === "x-forwarded-for" ? "203.0.113.9" : undefined,
+      name.toLowerCase() === "x-forwarded-for" ? RUN_IP : undefined,
     ...overrides,
   };
 };
@@ -309,6 +378,40 @@ describe("handleLabDataReport (Firestore emulator)", () => {
     expect((other.body as {reportId: string}).reportId).not.toBe(firstId);
     expect(reject({...payload(), submissionKey: "not-a-digest"}))
       .toBe("submissionKey: expected a SHA-256 hex digest");
+  });
+
+  it("stores near-maximum rows without hitting the document size limit", async () => {
+    signIn(uid("big-rows"));
+    const heavy = (ref: number) => ({
+      ...FIXTURE.rows[0],
+      ref,
+      code: {
+        text: "t".repeat(200),
+        codings: Array.from({length: 10}, (_, i) => ({
+          system: `https://example.test/${"s".repeat(170)}${i}`,
+          code: `C${i}`.padEnd(200, "0"),
+          display: "顯".repeat(66),
+        })),
+      },
+      performer: ["院".repeat(40), "所".repeat(40), "名".repeat(40)],
+      sourceTags: Array.from({length: 16}, (_, i) => `source-module:${"m".repeat(100)}${i}`),
+    });
+    const body = payload();
+    body.rows = Array.from({length: 300}, (_, i) => heavy(i + 1));
+    delete body.rows[0].sameValueGroup;
+    const res = mockRes();
+    await handleLabDataReport(mockReq(body) as never, res as never);
+    expect(res.statusCode).toBe(200);
+    const reportRef = getFirestore("mediprisma")
+      .collection(REPORTS_COLLECTION).doc((res.body as {reportId: string}).reportId);
+    const chunks = await reportRef.collection(ROWS_SUBCOLLECTION).orderBy("chunk").get();
+    // 250 fixed-count rows of this size would be ~2.5 MB in one document.
+    expect(chunks.size).toBeGreaterThan(2);
+    for (const chunk of chunks.docs) {
+      expect(firestoreSize(chunk.data())).toBeLessThan(1024 * 1024);
+    }
+    expect(chunks.docs.flatMap((chunk) => chunk.get("rows")).map((row: {ref: number}) => row.ref))
+      .toEqual(Array.from({length: 300}, (_, i) => i + 1));
   });
 
   it("answers 400 with the reason and stores nothing for a bad report", async () => {
