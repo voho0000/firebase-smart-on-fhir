@@ -487,6 +487,9 @@ export const RAW_ERRORS = [
   "INVALID_REQUEST", "READ_FAILED", "EXTENSION_UNAVAILABLE", "NO_LAB_SOURCE",
 ] as const;
 const RAW_DAY_LIMIT = 40000;
+/** The extension's manifest version: 1–4 dot-separated integers
+ *  (chrome.runtime.getManifest().version, e.g. "0.12.19"). */
+const PRODUCER_VERSION = /^\d{1,5}(?:\.\d{1,5}){0,3}$/;
 
 /**
  * One raw row, strictly: its source decides which fields may appear.
@@ -597,11 +600,16 @@ const normalizeRawSource = (
     "unknownFields",
   ], "rawSource");
   expectEnum(raw.producer, ["medcloud2"] as const, "rawSource.producer");
+  // A version number only ("0.12.19"), and — like every
+  // other string that is stored — it must pass the identifier scan
+  // ("2026.07.04" is a well-formed version and a date).
   if (raw.producerVersion !== undefined &&
     (typeof raw.producerVersion !== "string" ||
-      !/^[A-Za-z0-9._-]{1,32}$/.test(raw.producerVersion))) {
+      !PRODUCER_VERSION.test(raw.producerVersion))) {
     fail("rawSource.producerVersion: unexpected value");
   }
+  const producerVersion = rowString(raw.producerVersion,
+    "rawSource.producerVersion", budget, 32);
   const status = expectObject(raw.endpointStatus, "rawSource.endpointStatus");
   onlyKeys(status, ["s02", "s03"], "rawSource.endpointStatus");
   const endpointStatus: Json = {};
@@ -625,8 +633,7 @@ const normalizeRawSource = (
   return {
     header: {
       producer: "medcloud2",
-      ...(typeof raw.producerVersion === "string" &&
-        {producerVersion: raw.producerVersion}),
+      ...(producerVersion !== undefined && {producerVersion}),
       s02Rows: count("s02Rows"),
       s03Rows: count("s03Rows"),
       endpointStatus,

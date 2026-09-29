@@ -57,7 +57,7 @@ const summary = (id, data) => [
   `${daysLeft(data.expireAt)}d left`,
   (data.scope?.flaggedCategories?.length ? `flagged:${data.scope.flaggedCategories.join(',')}` : 'flagged:-'),
   data.problemType ?? '?',
-  `${data.rowCount ?? data.rows?.length ?? 0} rows${data.includesValues ? '' : ' (no values)'}`,
+  `${data.rowCount ?? data.rows?.length ?? 0} rows${data.includesValues ? '' : ' (no values)'}${data.rawRowCount ? ` + ${data.rawRowCount} raw` : ''}`,
   `${data.context?.dataSource ?? '?'}/${data.context?.site ?? '?'}`,
   data.description ? JSON.stringify(String(data.description).slice(0, 60)) : '',
 ].join('  ')
@@ -79,8 +79,18 @@ if (command === 'show') {
     const record = await db.collection(COLLECTION).doc(id).get()
     if (!record.exists) throw new Error(`${id}: not found (already resolved, or expired).`)
     const chunks = await record.ref.collection(ROWS).orderBy('chunk').get()
-    const rows = chunks.docs.flatMap((chunk) => chunk.get('rows') ?? [])
-    reports.push({ id, ...toPlain(record.data()), rows: toPlain(rows) })
+    // MediCloud raw rows ride in the same subcollection as their own chunks
+    // ("raw-000" …, kind "raw"); keep them apart from the converted rows.
+    const rowsOf = (raw) => chunks.docs
+      .filter((chunk) => (chunk.get('kind') === 'raw') === raw)
+      .flatMap((chunk) => chunk.get('rows') ?? [])
+    const rawRows = rowsOf(true)
+    reports.push({
+      id,
+      ...toPlain(record.data()),
+      rows: toPlain(rowsOf(false)),
+      ...(rawRows.length > 0 && { rawRows: toPlain(rawRows) }),
+    })
   }
   const text = JSON.stringify(reports.length === 1 ? reports[0] : reports, null, 2)
   if (out) {

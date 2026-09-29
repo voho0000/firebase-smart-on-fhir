@@ -31,6 +31,8 @@ test('lab-data report admin tool lists, shows, and deletes a handled report only
     // Two chunks, stored out of order on purpose.
     await db.doc(`labDataReports/${id}/labDataReportRows/001`).set({ chunk: 1, rows: [{ ref: 2, value: { kind: 'quantity', value: 99, magnitude: 1, decimals: 0 } }] })
     await db.doc(`labDataReports/${id}/labDataReportRows/000`).set({ chunk: 0, rows: [{ ref: 1, value: { kind: 'quantity', value: 98, magnitude: 1, decimals: 0 } }] })
+    // A MediCloud raw chunk shares the subcollection (and chunk numbers).
+    await db.doc(`labDataReports/${id}/labDataReportRows/raw-000`).set({ kind: 'raw', chunk: 0, rows: [{ ref: 1, source: 's02', fields: { order_code: '08003C' } }] })
   }
   await report('LDR-20260927-AAAAAAAA', 10)
   await report('LDR-20260927-BBBBBBBB', 5)
@@ -48,6 +50,7 @@ test('lab-data report admin tool lists, shows, and deletes a handled report only
     assert.equal(run('show', 'LDR-20260927-AAAAAAAA', `--out=${out}`).status, 0)
     const shown = JSON.parse(readFileSync(out, 'utf8'))
     assert.deepEqual(shown.rows.map((row) => row.value.value), [98, 99])
+    assert.deepEqual(shown.rawRows.map((row) => row.fields.order_code), ['08003C'])
     assert.match(shown.createdAt, /^\d{4}-\d{2}-\d{2}T/)
     assert.equal(statSync(out).mode & 0o777, 0o600)
 

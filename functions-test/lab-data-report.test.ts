@@ -404,6 +404,22 @@ describe("normalizeLabDataReport — MediCloud raw rows", () => {
     expect(rawRows[1].fields).toEqual({assaY_NAME: "大量白血球與細菌建議臨床追蹤並重新採檢以排除污染"});
   });
 
+  it.each(["A123456789", "0.12.19 A123456789", "0.12.19-beta", "v0.12.19", "1.2.3.4.5"])(
+    "refuses producer version %j that is not a version number", (version) => {
+      const body = withRaw();
+      body.rawSource.producerVersion = version;
+      expect(reject(body)).toBe("rawSource.producerVersion: unexpected value");
+    });
+
+  it("drops a well-formed producer version that reads as a date", () => {
+    const body = withRaw();
+    body.rawSource.producerVersion = "2026.07.04";
+    const {report, serverDroppedStrings} = normalizeLabDataReport(body);
+    expect((report.rawSource as {producerVersion?: string}).producerVersion)
+      .toBeUndefined();
+    expect(serverDroppedStrings).toBe(1);
+  });
+
   it("records why raw rows are missing", () => {
     const body = {...payload(), rawSourceError: "PATIENT_UNVERIFIED"};
     expect(normalizeLabDataReport(body).report.rawSourceError).toBe("PATIENT_UNVERIFIED");
