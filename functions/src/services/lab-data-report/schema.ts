@@ -441,6 +441,8 @@ const normalizeRow = (
 export interface NormalizedLabDataReport {
   report: Json;
   rowCount: number;
+  /** MediCloud raw rows (empty when none were attached); stored in chunks. */
+  rawRows: Json[];
   serverDroppedStrings: number;
   /** Panel ids outside PANEL_IDS, stored as "unknown". */
   serverUnknownPanels: number;
@@ -455,6 +457,195 @@ export interface NormalizedLabDataReport {
  * @param {unknown} body - Parsed JSON body.
  * @return {NormalizedLabDataReport} The report to store.
  */
+// ── MediCloud raw source rows (optional) ────────────────────────────────
+// The app may attach the 雲端病歷 extension's raw IMUE0060 laboratory rows,
+// narrowed in the browser to an allowlist (app: features/lab-data-report/
+// utils/raw-lab-rows.ts). The same allowlist is enforced here: any other
+// field is refused, every string is re-scanned, dates are relative days only.
+export const MAX_RAW_ROWS = 5000;
+const RAW_S02_TEXT = [
+  "order_code", "order_name", "assay_item_name", "unit_data",
+  "consult_value", "assay_mark", "assay_method", "assay_tp_cname",
+  "inspect_mode", "data_mark", "hosp", "func_type",
+] as const;
+const RAW_FIELDS = {
+  s02: {
+    text: RAW_S02_TEXT as readonly string[],
+    results: ["assay_value", "inspect_result", "memo_data"],
+    dates: ["case_time", "real_inspect_date", "recipe_date"],
+  },
+  s03: {
+    text: ["assaY_NAME"],
+    results: ["assaY_VALUE"],
+    dates: ["assaY_DATE"],
+  },
+} as const;
+const RAW_SOURCES = ["s02", "s03"] as const;
+export const RAW_ERRORS = [
+  "NOT_AVAILABLE", "EXPIRED", "BUNDLE_MISMATCH", "PATIENT_MISMATCH",
+  "PATIENT_UNVERIFIED", "CONTEXT_CHANGED", "REQUEST_IN_PROGRESS",
+  "INVALID_REQUEST", "READ_FAILED", "EXTENSION_UNAVAILABLE", "NO_LAB_SOURCE",
+] as const;
+const RAW_DAY_LIMIT = 40000;
+/** The extension's manifest version: 1–4 dot-separated integers
+ *  (chrome.runtime.getManifest().version, e.g. "0.12.19"). */
+const PRODUCER_VERSION = /^\d{1,5}(?:\.\d{1,5}){0,3}$/;
+
+/**
+ * One raw row, strictly: its source decides which fields may appear.
+ * @param {unknown} raw - Submitted row.
+ * @param {number} index - Position, for the rejection reason.
+ * @param {boolean} includesValues - Whether the reporter attached values.
+ * @param {ScanBudget} budget - Drop counter for this report.
+ * @return {Json} The normalised row.
+ */
+const normalizeRawRow = (
+  raw: unknown,
+  index: number,
+  includesValues: boolean,
+  budget: ScanBudget,
+): Json => {
+  const where = `rawSource.rows[${index}]`;
+  const row = expectObject(raw, where);
+  onlyKeys(row, [
+    "ref", "source", "ordinal", "dates", "fields", "results", "withheld",
+  ], where);
+  const source = expectEnum(row.source, RAW_SOURCES, `${where}.source`);
+  const allowed = RAW_FIELDS[source];
+  const out: Json = {
+    ref: expectInteger(row.ref, `${where}.ref`, 1, MAX_RAW_ROWS),
+    source,
+  };
+  if (row.ordinal !== undefined) {
+    out.ordinal = expectInteger(row.ordinal, `${where}.ordinal`, 0, 10_000_000);
+  }
+
+  const dates = expectObject(row.dates, `${where}.dates`);
+  onlyKeys(dates, allowed.dates, `${where}.dates`);
+  const datesOut: Json = {};
+  for (const [field, value] of Object.entries(dates)) {
+    const at = `${where}.dates.${field}`;
+    const date = expectObject(value, at);
+    onlyKeys(date, ["day", "time"], at);
+    const dateOut: Json = {
+      day: expectInteger(date.day, `${at}.day`, -RAW_DAY_LIMIT, RAW_DAY_LIMIT),
+    };
+    if (date.time !== undefined) {
+      if (typeof date.time !== "string" ||
+        !/^\d{2}:\d{2}(:\d{2})?$/.test(date.time)) {
+        fail(`${at}.time: expected HH:MM[:SS]`);
+      }
+      dateOut.time = date.time;
+    }
+    datesOut[field] = dateOut;
+  }
+  out.dates = datesOut;
+
+  const fields = expectObject(row.fields, `${where}.fields`);
+  onlyKeys(fields, allowed.text, `${where}.fields`);
+  const fieldsOut: Json = {};
+  for (const [field, value] of Object.entries(fields)) {
+    const text = rowString(value, `${where}.fields.${field}`, budget,
+      field === "consult_value" ? MAX_RANGE_TEXT : MAX_STRING);
+    if (text !== undefined) fieldsOut[field] = text;
+  }
+  out.fields = fieldsOut;
+
+  const results = expectObject(row.results, `${where}.results`);
+  onlyKeys(results, allowed.results, `${where}.results`);
+  if (!includesValues && Object.keys(results).length > 0) {
+    fail(`${where}.results: values not attached`);
+  }
+  const resultsOut: Json = {};
+  for (const [field, value] of Object.entries(results)) {
+    const at = `${where}.results.${field}`;
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) fail(`${at}: expected number`);
+      resultsOut[field] = value;
+      continue;
+    }
+    const text = resultString(value, at, budget);
+    if (text !== undefined) resultsOut[field] = text;
+  }
+  out.results = resultsOut;
+
+  const withheld = expectObject(row.withheld, `${where}.withheld`);
+  onlyKeys(withheld, allowed.results, `${where}.withheld`);
+  const withheldOut: Json = {};
+  for (const [field, value] of Object.entries(withheld)) {
+    withheldOut[field] =
+      expectInteger(value, `${where}.withheld.${field}`, 0, 1_000_000);
+  }
+  out.withheld = withheldOut;
+  return out;
+};
+
+/**
+ * The raw-source block, strictly.
+ * @param {unknown} value - Submitted block.
+ * @param {boolean} includesValues - Whether the reporter attached values.
+ * @param {ScanBudget} budget - Drop counter for this report.
+ * @return {{header: Json, rows: Json[]}} Header (stored on the report) and
+ *   rows (stored in chunks).
+ */
+const normalizeRawSource = (
+  value: unknown,
+  includesValues: boolean,
+  budget: ScanBudget,
+): {header: Json; rows: Json[]} => {
+  const raw = expectObject(value, "rawSource");
+  onlyKeys(raw, [
+    "producer", "producerVersion", "rows", "s02Rows", "s03Rows",
+    "endpointStatus", "truncatedRows", "droppedStrings", "unparsedDates",
+    "unknownFields",
+  ], "rawSource");
+  expectEnum(raw.producer, ["medcloud2"] as const, "rawSource.producer");
+  // A version number only ("0.12.19"), and — like every
+  // other string that is stored — it must pass the identifier scan
+  // ("2026.07.04" is a well-formed version and a date).
+  if (raw.producerVersion !== undefined &&
+    (typeof raw.producerVersion !== "string" ||
+      !PRODUCER_VERSION.test(raw.producerVersion))) {
+    fail("rawSource.producerVersion: unexpected value");
+  }
+  const producerVersion = rowString(raw.producerVersion,
+    "rawSource.producerVersion", budget, 32);
+  const status = expectObject(raw.endpointStatus, "rawSource.endpointStatus");
+  onlyKeys(status, ["s02", "s03"], "rawSource.endpointStatus");
+  const endpointStatus: Json = {};
+  for (const [key, code] of Object.entries(status)) {
+    endpointStatus[key] =
+      expectInteger(code, `rawSource.endpointStatus.${key}`, 100, 599);
+  }
+  const unknownFields = expectArray(raw.unknownFields,
+    "rawSource.unknownFields", 20)
+    .map((name, i) => {
+      if (typeof name !== "string" || !/^[A-Za-z0-9_]{1,40}$/.test(name)) {
+        return fail(`rawSource.unknownFields[${i}]: unexpected value`);
+      }
+      return rowString(name, `rawSource.unknownFields[${i}]`, budget, 40);
+    })
+    .filter((name): name is string => name !== undefined);
+  const rows = expectArray(raw.rows, "rawSource.rows", MAX_RAW_ROWS)
+    .map((row, index) => normalizeRawRow(row, index, includesValues, budget));
+  const count = (key: string) =>
+    expectInteger(raw[key], `rawSource.${key}`, 0, 1_000_000);
+  return {
+    header: {
+      producer: "medcloud2",
+      ...(producerVersion !== undefined && {producerVersion}),
+      s02Rows: count("s02Rows"),
+      s03Rows: count("s03Rows"),
+      endpointStatus,
+      truncatedRows: count("truncatedRows"),
+      droppedStrings: count("droppedStrings"),
+      unparsedDates: count("unparsedDates"),
+      unknownFields,
+    },
+    rows,
+  };
+};
+
 export const normalizeLabDataReport = (
   body: unknown,
 ): NormalizedLabDataReport => {
@@ -462,7 +653,7 @@ export const normalizeLabDataReport = (
   onlyKeys(payload, [
     "schemaVersion", "problemType", "description", "includesValues", "scope",
     "context", "rows", "truncatedRows", "excludedNonLabRows",
-    "droppedStrings", "submissionKey",
+    "droppedStrings", "submissionKey", "rawSource", "rawSourceError",
   ], "body");
   if (
     payload.submissionKey !== undefined &&
@@ -518,6 +709,17 @@ export const normalizeLabDataReport = (
     .map((row, index) => normalizeRow(row, index, budget));
   if (rows.length === 0) fail("rows: empty");
 
+  const rawSource = payload.rawSource === undefined ?
+    undefined :
+    normalizeRawSource(payload.rawSource, payload.includesValues === true,
+      budget);
+  const rawSourceError = payload.rawSourceError === undefined ?
+    undefined :
+    expectEnum(payload.rawSourceError, RAW_ERRORS, "rawSourceError");
+  if (rawSource && rawSourceError) {
+    fail("rawSourceError: raw rows are attached");
+  }
+
   const report: Json = {
     schemaVersion: LAB_DATA_REPORT_SCHEMA_VERSION,
     problemType: expectEnum(payload.problemType, PROBLEM_TYPES, "problemType"),
@@ -543,10 +745,13 @@ export const normalizeLabDataReport = (
     droppedStrings: expectInteger(
       payload.droppedStrings, "droppedStrings", 0, 1_000_000,
     ),
+    ...(rawSource && {rawSource: rawSource.header}),
+    ...(rawSourceError && {rawSourceError}),
   };
   return {
     report,
     rowCount: rows.length,
+    rawRows: rawSource?.rows ?? [],
     serverDroppedStrings: budget.dropped,
     serverUnknownPanels: budget.unknownPanels,
     ...(typeof payload.submissionKey === "string" &&
