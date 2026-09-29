@@ -55,6 +55,43 @@ const FIXTURE = JSON.parse(readFileSync(
 ));
 const payload = () => JSON.parse(JSON.stringify(FIXTURE));
 
+// MediCloud raw rows as the app's assembleRawLabSource emits them (synthetic).
+const RAW_SOURCE = {
+  producer: "medcloud2",
+  producerVersion: "0.12.19",
+  rows: [
+    {
+      ref: 1, source: "s02", ordinal: 1,
+      dates: {
+        case_time: {day: 0, time: "09:30:00"},
+        real_inspect_date: {day: 0},
+        recipe_date: {day: -1},
+      },
+      fields: {
+        order_code: "08003C", order_name: "血色素檢查", assay_item_name: "Hb",
+        unit_data: "g/dL", consult_value: "12~16", hosp: "合成醫院甲",
+      },
+      results: {assay_value: "11.2"},
+      withheld: {inspect_result: 57},
+    },
+    {
+      ref: 2, source: "s03", ordinal: 3,
+      dates: {assaY_DATE: {day: -467}},
+      fields: {assaY_NAME: "HbA1c"},
+      results: {assaY_VALUE: 6.8},
+      withheld: {},
+    },
+  ],
+  s02Rows: 1,
+  s03Rows: 1,
+  endpointStatus: {s02: 200, s03: 200},
+  truncatedRows: 0,
+  droppedStrings: 0,
+  unparsedDates: 0,
+  unknownFields: ["new_col"],
+};
+const withRaw = () => ({...payload(), rawSource: JSON.parse(JSON.stringify(RAW_SOURCE))});
+
 const reject = (body: unknown): string => {
   try {
     normalizeLabDataReport(body);
@@ -290,6 +327,90 @@ const mockReq = (body: unknown, overrides: Record<string, unknown> = {}) => {
 let n = 0;
 const uid = (label: string) => `lab-report-${label}-${Date.now()}-${n++}`;
 
+describe("normalizeLabDataReport — MediCloud raw rows", () => {
+  it("accepts the app's raw block and returns its rows apart", () => {
+    const {report, rawRows, serverDroppedStrings} = normalizeLabDataReport(withRaw());
+    expect(rawRows).toEqual(RAW_SOURCE.rows);
+    expect(report.rawSource).toEqual({
+      producer: "medcloud2",
+      producerVersion: "0.12.19",
+      s02Rows: 1,
+      s03Rows: 1,
+      endpointStatus: {s02: 200, s03: 200},
+      truncatedRows: 0,
+      droppedStrings: 0,
+      unparsedDates: 0,
+      unknownFields: ["new_col"],
+    });
+    expect(serverDroppedStrings).toBe(0);
+  });
+
+  it("has no raw rows when none were attached", () => {
+    expect(normalizeLabDataReport(payload()).rawRows).toEqual([]);
+  });
+
+  it.each([
+    ["an S02 field outside the allowlist", (b: any) => {
+      b.rawSource.rows[0].fields.hosp_id = "SYNTH";
+    }, "rawSource.rows[0].fields: unexpected field"],
+    ["an S02 field on an S03 row", (b: any) => {
+      b.rawSource.rows[1].fields.order_code = "08003C";
+    }, "rawSource.rows[1].fields: unexpected field"],
+    ["a diagnosis", (b: any) => {
+      b.rawSource.rows[0].fields.icd_code = "Z00.0";
+    }, "rawSource.rows[0].fields: unexpected field"],
+    ["an absolute date", (b: any) => {
+      b.rawSource.rows[0].dates.case_time = "2026-03-02";
+    }, "rawSource.rows[0].dates.case_time: expected object"],
+    ["a date field outside the allowlist", (b: any) => {
+      b.rawSource.rows[0].dates.log2time = {day: 1};
+    }, "rawSource.rows[0].dates: unexpected field"],
+    ["a malformed time", (b: any) => {
+      b.rawSource.rows[0].dates.case_time.time = "09:30 +08:00";
+    }, "rawSource.rows[0].dates.case_time.time: expected HH:MM[:SS]"],
+    ["values when the reporter withheld them", (b: any) => {
+      b.includesValues = false;
+    }, "rawSource.rows[0].results: values not attached"],
+    ["an unknown producer", (b: any) => {
+      b.rawSource.producer = "other";
+    }, "rawSource.producer: unexpected value"],
+    ["an unexpected block field", (b: any) => {
+      b.rawSource.patient = "F203XXX511";
+    }, "rawSource: unexpected field"],
+    ["a field name that is not a plain name", (b: any) => {
+      b.rawSource.unknownFields = ["a b"];
+    }, "rawSource.unknownFields[0]: unexpected value"],
+    ["raw rows and an error together", (b: any) => {
+      b.rawSourceError = "EXPIRED";
+    }, "rawSourceError: raw rows are attached"],
+  ])("refuses %s", (_label, mutate, reason) => {
+    const body = withRaw();
+    mutate(body);
+    expect(reject(body)).toBe(reason);
+  });
+
+  it("drops identifier-like raw strings and narrative results, and counts them", () => {
+    const body = withRaw();
+    body.rawSource.rows[0].fields.consult_value = "病歷號 12345678";
+    body.rawSource.rows[0].fields.hosp = "合成醫院 0912345678";
+    body.rawSource.rows[0].results.assay_value = "生日 65/3/12";
+    body.rawSource.rows[1].fields.assaY_NAME = "大量白血球與細菌建議臨床追蹤並重新採檢以排除污染";
+    const {rawRows, serverDroppedStrings} = normalizeLabDataReport(body);
+    expect(rawRows[0].fields).toEqual({
+      order_code: "08003C", order_name: "血色素檢查", assay_item_name: "Hb", unit_data: "g/dL",
+    });
+    expect(rawRows[0].results).toEqual({});
+    expect(serverDroppedStrings).toBe(3);
+    expect(rawRows[1].fields).toEqual({assaY_NAME: "大量白血球與細菌建議臨床追蹤並重新採檢以排除污染"});
+  });
+
+  it("records why raw rows are missing", () => {
+    const body = {...payload(), rawSourceError: "PATIENT_UNVERIFIED"};
+    expect(normalizeLabDataReport(body).report.rawSourceError).toBe("PATIENT_UNVERIFIED");
+    expect(reject({...payload(), rawSourceError: "SOMETHING"})).toBe("rawSourceError: unexpected value");
+  });
+});
+
 describe("handleLabDataReport (Firestore emulator)", () => {
   beforeAll(() => {
     if (getApps().length === 0) initializeApp({projectId: "demo-mediprisma"});
@@ -354,6 +475,35 @@ describe("handleLabDataReport (Firestore emulator)", () => {
     }
   });
 
+  it("stores MediCloud raw rows as their own chunks under the report", async () => {
+    signIn(uid("raw"));
+    const body = withRaw();
+    body.rawSource.rows = Array.from({length: 600}, (_, i) => ({
+      ...RAW_SOURCE.rows[i % 2], ref: i + 1,
+    }));
+    const res = mockRes();
+    await handleLabDataReport(mockReq(body) as never, res as never);
+    expect(res.statusCode).toBe(200);
+    const reportRef = getFirestore("mediprisma")
+      .collection(REPORTS_COLLECTION).doc((res.body as {reportId: string}).reportId);
+    const data = (await reportRef.get()).data()!;
+    expect(data.rawRowCount).toBe(600);
+    expect(data.rawRowChunks).toBe(3);
+    expect(data.rawSource.producerVersion).toBe("0.12.19");
+    expect(data.rawSource.rows).toBeUndefined();
+    const all = await reportRef.collection(ROWS_SUBCOLLECTION).get();
+    const raw = all.docs.filter((doc) => doc.get("kind") === "raw")
+      .sort((a, b) => a.get("chunk") - b.get("chunk"));
+    expect(raw.map((doc) => doc.id)).toEqual(["raw-000", "raw-001", "raw-002"]);
+    expect(raw.flatMap((doc) => doc.get("rows")).map((row: {ref: number}) => row.ref))
+      .toEqual(Array.from({length: 600}, (_, i) => i + 1));
+    const converted = all.docs.filter((doc) => doc.get("kind") === undefined);
+    expect(converted.flatMap((doc) => doc.get("rows"))).toHaveLength(data.rowCount);
+    for (const doc of all.docs) {
+      expect(doc.get("expireAt").toMillis()).toBe(data.expireAt.toMillis());
+    }
+  });
+
   it("mails a metadata-only notice once per stored report", async () => {
     (sendLabReportNotice as jest.Mock).mockClear();
     signIn(uid("notice"));
@@ -370,6 +520,7 @@ describe("handleLabDataReport (Firestore emulator)", () => {
       flaggedCategories: FIXTURE.scope.flaggedCategories,
       categories: FIXTURE.scope.categories,
       rowCount: FIXTURE.rows.length,
+      rawRowCount: 0,
       includesValues: FIXTURE.includesValues,
       dataSource: FIXTURE.context.dataSource,
       site: FIXTURE.context.site,
@@ -380,6 +531,9 @@ describe("handleLabDataReport (Firestore emulator)", () => {
     const all = `${mail.subject}\n${mail.text}\n${mail.html}`;
     expect(mail.subject).toBe("[檢驗資料回報] 生化 · 重複值 · 5 列");
     expect(all).toContain(`https://example.test/lab-reports?id=${notice.reportId}`);
+    expect(mail.text).toContain("雲端病歷原始列：未附");
+    expect(composeLabReportNotice({...notice, rawRowCount: 600}).text)
+      .toContain("雲端病歷原始列：600 列");
     // No note text, hospital, test name, code or value ever reaches the inbox.
     for (const secret of [
       FIXTURE.description, "4.41", "測試醫院", "0936050029", "Hemoglobin",

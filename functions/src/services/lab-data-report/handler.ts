@@ -241,12 +241,18 @@ export const handleLabDataReport = async (
   const {rows, ...header} = normalized.report;
   const chunks = chunkRows(rows as unknown[]);
   const chunkCount = chunks.length;
+  // MediCloud raw rows ride in the same subcollection as their own chunks
+  // ("raw-000" …, kind "raw"), so the rules, the TTL and the delete path
+  // that cover the report's rows cover them too.
+  const rawChunks = chunkRows(normalized.rawRows);
   const document = {
     ...header,
     reporterUid: user.uid,
     reporterIsAnonymous: user.isAnonymous,
     rowCount: normalized.rowCount,
     rowChunks: chunkCount,
+    rawRowCount: normalized.rawRows.length,
+    rawRowChunks: rawChunks.length,
     serverDroppedStrings: normalized.serverDroppedStrings,
     serverUnknownPanels: normalized.serverUnknownPanels,
     createdAt: FieldValue.serverTimestamp(),
@@ -275,6 +281,13 @@ export const handleLabDataReport = async (
         {chunk, rows: chunkRowsList, expireAt},
       );
     });
+    rawChunks.forEach((chunkRowsList, chunk) => {
+      batch.create(
+        reportRef.collection(ROWS_SUBCOLLECTION)
+          .doc(`raw-${String(chunk).padStart(3, "0")}`),
+        {kind: "raw", chunk, rows: chunkRowsList, expireAt},
+      );
+    });
     await batch.commit();
   };
   let reportId = createReportId(now);
@@ -296,6 +309,7 @@ export const handleLabDataReport = async (
   logger.info("Lab-data report stored", {
     reportId,
     rowCount: normalized.rowCount,
+    rawRowCount: normalized.rawRows.length,
     serverDroppedStrings: normalized.serverDroppedStrings,
     problemType: normalized.report.problemType,
   });
@@ -314,6 +328,7 @@ export const handleLabDataReport = async (
     flaggedCategories: scope.flaggedCategories,
     categories: scope.categories,
     rowCount: normalized.rowCount,
+    rawRowCount: normalized.rawRows.length,
     includesValues: normalized.report.includesValues === true,
     dataSource: context.dataSource,
     site: context.site,

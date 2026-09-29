@@ -54,6 +54,8 @@ export interface LabReportNotice {
   flaggedCategories: string[];
   categories: Array<{categoryId: string; rows: number}>;
   rowCount: number;
+  /** MediCloud raw rows attached (0 when none). */
+  rawRowCount?: number;
   includesValues: boolean;
   dataSource: string;
   site: string;
@@ -94,6 +96,8 @@ export const composeLabReportNotice = (
       .map((entry) => `${panel(entry.categoryId)} ${entry.rows}`)
       .join("、")}）`],
     ["附數值", notice.includesValues ? "是" : "否"],
+    ["雲端病歷原始列", notice.rawRowCount ?
+      `${notice.rawRowCount} 列` : "未附"],
     ["資料來源", `${SOURCE_LABELS[notice.dataSource] ?? notice.dataSource}` +
       (notice.site !== "unknown" ? ` · ${notice.site}` : "")],
     ["說明", notice.hasDescription ? "有（請在檢視頁查看）" : "無"],
