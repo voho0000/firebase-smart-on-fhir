@@ -18,6 +18,7 @@ import {
   chunkRows,
   firestoreSize,
   handleLabDataReport,
+  isConnectionTest,
   MAX_CHUNK_BYTES,
   RATE_LIMIT_COLLECTION,
   REPORTS_COLLECTION,
@@ -630,6 +631,49 @@ describe("handleLabDataReport (Firestore emulator)", () => {
       success: false,
       reason: "description-identifier:phone,long-number",
     }));
+  });
+
+  it("answers a connection test without storing it or counting it", async () => {
+    const tester = uid("connection");
+    signIn(tester, false);
+    (sendLabReportNotice as jest.Mock).mockClear();
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const res = mockRes();
+      await handleLabDataReport(
+        mockReq(i % 2 ? JSON.stringify({connectionTest: true}) : {connectionTest: true}) as never,
+        res as never,
+      );
+      statuses.push(res.statusCode);
+      expect(res.body).toEqual({success: true, connectionTest: true});
+    }
+    expect(statuses.every((status) => status === 200)).toBe(true);
+    const stored = await getFirestore("mediprisma")
+      .collection(REPORTS_COLLECTION).where("reporterUid", "==", tester).get();
+    expect(stored.empty).toBe(true);
+    expect(sendLabReportNotice).not.toHaveBeenCalled();
+
+    // Still a whole report's allowance after the tests.
+    const report = mockRes();
+    await handleLabDataReport(mockReq(payload()) as never, report as never);
+    expect(report.statusCode).toBe(200);
+    expect(report.body).toEqual(expect.objectContaining({success: true}));
+  });
+
+  it("holds anything beside the connection-test flag to the report contract", async () => {
+    signIn(uid("connection-extra"));
+    for (const body of [
+      {connectionTest: true, description: ""},
+      {connectionTest: false},
+      {connectionTest: "true"},
+      [{connectionTest: true}],
+    ]) {
+      const res = mockRes();
+      await handleLabDataReport(mockReq(body) as never, res as never);
+      expect(res.statusCode).toBe(400);
+    }
+    expect(isConnectionTest("{not json")).toBe(false);
+    expect(isConnectionTest(null)).toBe(false);
   });
 
   it("refuses non-JSON, oversize and non-POST requests", async () => {
