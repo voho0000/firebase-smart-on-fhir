@@ -167,6 +167,30 @@ const bodyBytes = (req: Request): number => {
   return Buffer.byteLength(JSON.stringify(req.body ?? {}));
 };
 
+/**
+ * The app's 僅連線測試: a body of exactly `{"connectionTest": true}`, no
+ * report fields. Anything more is parsed as a report and held to its
+ * contract.
+ * @param {unknown} body The request body, parsed or not.
+ * @return {boolean} Whether the body is a connection test.
+ */
+export const isConnectionTest = (body: unknown): boolean => {
+  let parsed = body;
+  if (typeof body === "string") {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return false;
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return false;
+  }
+  const keys = Object.keys(parsed);
+  return keys.length === 1 &&
+    (parsed as Record<string, unknown>).connectionTest === true;
+};
+
 export const handleLabDataReport = async (
   req: Request,
   res: Response,
@@ -187,6 +211,17 @@ export const handleLabDataReport = async (
   }
   if (bodyBytes(req) > MAX_BODY_BYTES) {
     res.status(413).json({success: false, error: "Payload too large"});
+    return;
+  }
+
+  // A connection test has come through CORS, the client key, App Check and
+  // sign-in — all it asks. It stores nothing, mails nothing and does not
+  // spend the reporter's hourly allowance of reports.
+  if (isConnectionTest(req.body)) {
+    logger.info("Lab-data report connection test", {
+      anonymous: user.isAnonymous,
+    });
+    res.status(200).json({success: true, connectionTest: true});
     return;
   }
 
